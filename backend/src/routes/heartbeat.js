@@ -28,15 +28,23 @@ router.post('/', (req, res) => {
             return res.status(404).json({ error: 'Script not found' });
         }
 
-        // Verify HMAC
+        // Verify HMAC — executors may send hex OR base64
         const message = `${script}:${userid}:${timestamp}`;
-        const expectedSig = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
+        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
 
-        try {
-            if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
-                return res.status(401).json({ error: 'Invalid signature' });
+        // Convert incoming signature to hex (might be base64 or hex already)
+        let sigHex = signature;
+        if (/[^0-9a-fA-F]/.test(signature)) {
+            // Not hex — assume base64, convert to hex
+            try {
+                sigHex = Buffer.from(signature, 'base64').toString('hex');
+            } catch {
+                return res.status(401).json({ error: 'Invalid signature format' });
             }
-        } catch {
+        }
+
+        if (sigHex.length !== expectedHex.length ||
+            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
             return res.status(401).json({ error: 'Invalid signature' });
         }
 

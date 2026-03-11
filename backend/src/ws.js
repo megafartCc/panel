@@ -44,8 +44,10 @@ function initWebSocket(server) {
             catch { ws.close(4001, 'Invalid token'); return; }
 
             dashboardClients.add(ws);
+            ws.isAlive = true;
             console.log(`[WS:Dash] Connected (${dashboardClients.size} total)`);
 
+            ws.on('pong', () => { ws.isAlive = true; });
             ws.on('close', () => {
                 dashboardClients.delete(ws);
                 console.log(`[WS:Dash] Disconnected (${dashboardClients.size} total)`);
@@ -142,14 +144,28 @@ function initWebSocket(server) {
     // Stale session cleanup every 30s
     setInterval(cleanupStaleSessions, 30000);
 
-    // Keepalive pings every 25s
+    // Keepalive pings for ALL clients every 20s (Railway kills idle WS ~30s)
     setInterval(() => {
+        // Dashboard clients — protocol-level ping
+        for (const ws of dashboardClients) {
+            if (ws.readyState === 1) {
+                if (ws.isAlive === false) {
+                    dashboardClients.delete(ws);
+                    ws.terminate();
+                    console.log(`[WS:Dash] Terminated dead client (${dashboardClients.size} total)`);
+                    continue;
+                }
+                ws.isAlive = false;
+                ws.ping();
+            }
+        }
+        // Script clients — JSON ping
         for (const [ws] of scriptClients) {
             if (ws.readyState === 1) {
                 try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* */ }
             }
         }
-    }, 25000);
+    }, 20000);
 
     console.log('[WS] Dashboard (/ws) + Script (/ws/script) servers initialized');
     console.log(`[WS] Script clients: ${scriptClients.size}, Dashboard clients: ${dashboardClients.size}`);

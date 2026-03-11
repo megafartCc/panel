@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BarChart3, LogOut, UserCircle2 } from 'lucide-react';
 import { usePolling } from '../hooks/useWebSocket';
+import { clearPanelToken } from '../lib/storage';
 
 function compact(value) {
     return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0);
@@ -13,7 +14,7 @@ export default function Layout() {
     const navItems = [{ to: '/', icon: BarChart3, label: 'Analytics' }];
 
     const handleLogout = () => {
-        localStorage.removeItem('panel_token');
+        clearPanelToken();
         navigate('/login');
     };
 

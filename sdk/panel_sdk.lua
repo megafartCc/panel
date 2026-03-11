@@ -14,6 +14,15 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local lp = Players.LocalPlayer
 
+local function firstFunction(candidates)
+    for _, candidate in ipairs(candidates) do
+        if type(candidate) == "function" then
+            return candidate
+        end
+    end
+    return nil
+end
+
 -- HMAC helper (multi-executor compat)
 local function computeHmac(key, message)
     if syn and syn.crypt and syn.crypt.hmac then
@@ -43,6 +52,43 @@ local function getExecutorName()
     return "Unknown"
 end
 
+local function getRequestFunction()
+    return firstFunction({
+        request,
+        http_request,
+        httprequest,
+        (syn and syn.request),
+        (http and http.request),
+        (fluxus and fluxus.request),
+    })
+end
+
+local function trySendRequest(requestFn, url, body)
+    local variants = {
+        {
+            Url = url,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = body,
+        },
+        {
+            url = url,
+            method = "POST",
+            headers = { ["Content-Type"] = "application/json" },
+            body = body,
+        },
+    }
+
+    for _, options in ipairs(variants) do
+        local ok, response = pcall(requestFn, options)
+        if ok and response ~= nil then
+            return true, response
+        end
+    end
+
+    return false, nil
+end
+
 local function sendPing(panelUrl, scriptSlug, hmacKey)
     pcall(function()
         local timestamp = tostring(math.floor(os.time()))
@@ -60,14 +106,9 @@ local function sendPing(panelUrl, scriptSlug, hmacKey)
             signature = sig
         })
 
-        local requestFn = request or http_request or (syn and syn.request) or httprequest
+        local requestFn = getRequestFunction()
         if requestFn then
-            requestFn({
-                Url = panelUrl .. "/api/heartbeat",
-                Method = "POST",
-                Headers = { ["Content-Type"] = "application/json" },
-                Body = body
-            })
+            trySendRequest(requestFn, panelUrl .. "/api/heartbeat", body)
         end
     end)
 end

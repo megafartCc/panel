@@ -1,281 +1,343 @@
-import { useState, useEffect } from 'react'
-import { apiFetch } from '../lib/api'
-import { Plus, Trash2, Key, Copy, Check, Code2, Users, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '../lib/api';
+import { Check, Copy, KeyRound, LoaderCircle, Plus, ShieldCheck, Sparkles, Trash2, Wrench } from 'lucide-react';
 
 function CopyButton({ text }) {
-    const [copied, setCopied] = useState(false)
+    const [copied, setCopied] = useState(false);
 
     const handleCopy = async () => {
-        await navigator.clipboard.writeText(text)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-    }
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+    };
 
     return (
         <button
             onClick={handleCopy}
-            className="p-1.5 rounded-md hover:bg-panel-card-hover transition-colors cursor-pointer"
-            title="Copy to clipboard"
+            className="inline-flex items-center gap-2 rounded-xl border border-panel-border bg-white/[0.04] px-3 py-2 text-xs text-panel-text-dim transition hover:bg-white/[0.08] hover:text-white"
         >
-            {copied ? <Check className="w-3.5 h-3.5 text-panel-success" /> : <Copy className="w-3.5 h-3.5 text-panel-text-muted" />}
+            {copied ? <Check className="h-3.5 w-3.5 text-panel-success" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? 'Copied' : 'Copy'}
         </button>
-    )
+    );
 }
 
-function LuaSnippetModal({ script, onClose }) {
-    const snippet = `-- Add this near the top of your script
-local PANEL_URL = "https://YOUR_DOMAIN.com" -- Change to your deployed URL
+function IntegrationModal({ script, onClose }) {
+    const snippet = `local PANEL_URL = "https://YOUR_DOMAIN.com"
 local PANEL_SCRIPT = "${script.slug}"
 local PANEL_KEY = "${script.hmac_key}"
 
--- Load Panel SDK
 pcall(function()
     local sdk = loadstring(game:HttpGet(PANEL_URL .. "/sdk/panel_sdk.lua"))()
     sdk.init(PANEL_URL, PANEL_SCRIPT, PANEL_KEY)
-end)`
+end)`;
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-panel-card border border-panel-border rounded-2xl p-6 max-w-xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-white">Integration Code</h3>
-                    <button onClick={onClose} className="text-panel-text-muted hover:text-white transition-colors cursor-pointer">✕</button>
-                </div>
-                <p className="text-sm text-panel-text-dim mb-3">
-                    Add this snippet to <span className="text-panel-accent font-mono">{script.slug}.lua</span> to start sending heartbeats:
-                </p>
-                <div className="relative">
-                    <pre className="bg-panel-bg border border-panel-border rounded-xl p-4 text-sm text-panel-text font-mono overflow-x-auto whitespace-pre">
-                        {snippet}
-                    </pre>
-                    <div className="absolute top-2 right-2">
-                        <CopyButton text={snippet} />
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 p-4 backdrop-blur-md"
+            onClick={onClose}
+        >
+            <div
+                className="panel-card-strong panel-ring w-full max-w-3xl rounded-[30px] p-5 sm:p-6"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Integration</p>
+                        <h3 className="mt-2 text-2xl font-semibold">{script.name}</h3>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-panel-text-dim">
+                            Embed this snippet into the script entrypoint. The heartbeat payload uses the script slug and HMAC key below.
+                        </p>
                     </div>
+                    <button
+                        onClick={onClose}
+                        className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-2 text-sm text-panel-text-dim transition hover:bg-white/[0.08] hover:text-white"
+                    >
+                        Close
+                    </button>
                 </div>
-                <div className="mt-4 p-3 rounded-lg bg-panel-warning/10 border border-panel-warning/20">
-                    <p className="text-xs text-panel-warning">
-                        ⚠️ Keep the HMAC key private. Anyone with this key can send heartbeats for this script.
-                    </p>
+
+                <div className="mt-6 grid gap-4 lg:grid-cols-[0.88fr_1.12fr]">
+                    <div className="space-y-4 rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                        <div>
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Slug</p>
+                            <p className="panel-mono mt-2 text-sm text-white">{script.slug}</p>
+                        </div>
+                        <div>
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">HMAC key</p>
+                            <p className="panel-mono mt-2 break-all text-sm text-white">{script.hmac_key}</p>
+                        </div>
+                        <div className="rounded-2xl border border-panel-border bg-[linear-gradient(135deg,_rgba(255,107,87,0.12),_rgba(103,184,255,0.08))] p-4 text-sm text-panel-text-dim">
+                            Keep this key private. Anyone holding it can impersonate heartbeat traffic for this script slug.
+                        </div>
+                    </div>
+
+                    <div className="rounded-[24px] border border-panel-border bg-[#050b15] p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Snippet</p>
+                            <CopyButton text={snippet} />
+                        </div>
+                        <pre className="panel-mono overflow-x-auto whitespace-pre rounded-[18px] border border-panel-border bg-black/20 p-4 text-sm leading-7 text-[#dbe7ff]">
+                            {snippet}
+                        </pre>
+                    </div>
                 </div>
             </div>
         </div>
-    )
+    );
 }
 
 export default function Scripts() {
-    const [scripts, setScripts] = useState([])
-    const [loading, setLoading] = useState(true)
-    const [showAdd, setShowAdd] = useState(false)
-    const [newName, setNewName] = useState('')
-    const [newSlug, setNewSlug] = useState('')
-    const [addError, setAddError] = useState('')
-    const [addLoading, setAddLoading] = useState(false)
-    const [snippetScript, setSnippetScript] = useState(null)
-    const [deleteConfirm, setDeleteConfirm] = useState(null)
+    const [scripts, setScripts] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showAdd, setShowAdd] = useState(false);
+    const [newName, setNewName] = useState('');
+    const [newSlug, setNewSlug] = useState('');
+    const [addError, setAddError] = useState('');
+    const [addLoading, setAddLoading] = useState(false);
+    const [snippetScript, setSnippetScript] = useState(null);
+    const [deleteConfirm, setDeleteConfirm] = useState(null);
+
+    const totalLive = useMemo(
+        () => scripts.reduce((sum, script) => sum + (script.active_users || 0), 0),
+        [scripts],
+    );
 
     const loadScripts = async () => {
         try {
-            const data = await apiFetch('/scripts')
-            setScripts(data)
-        } catch (err) {
-            console.error('Failed to load scripts:', err)
+            const data = await apiFetch('/scripts');
+            setScripts(data);
+        } catch (error) {
+            console.error('Failed to load scripts:', error);
         } finally {
-            setLoading(false)
+            setLoading(false);
         }
-    }
+    };
 
-    useEffect(() => { loadScripts() }, [])
+    useEffect(() => {
+        loadScripts();
+    }, []);
 
-    const handleAdd = async (e) => {
-        e.preventDefault()
-        setAddError('')
-        setAddLoading(true)
+    const handleAdd = async (event) => {
+        event.preventDefault();
+        setAddError('');
+        setAddLoading(true);
 
         try {
             await apiFetch('/scripts', {
                 method: 'POST',
-                body: JSON.stringify({ name: newName, slug: newSlug })
-            })
-            setNewName('')
-            setNewSlug('')
-            setShowAdd(false)
-            loadScripts()
-        } catch (err) {
-            setAddError(err.message)
+                body: JSON.stringify({ name: newName, slug: newSlug }),
+            });
+            setNewName('');
+            setNewSlug('');
+            setShowAdd(false);
+            await loadScripts();
+        } catch (error) {
+            setAddError(error.message);
         } finally {
-            setAddLoading(false)
+            setAddLoading(false);
         }
-    }
+    };
 
     const handleDelete = async (id) => {
         try {
-            await apiFetch(`/scripts/${id}`, { method: 'DELETE' })
-            setDeleteConfirm(null)
-            loadScripts()
-        } catch (err) {
-            console.error('Failed to delete:', err)
+            await apiFetch(`/scripts/${id}`, { method: 'DELETE' });
+            setDeleteConfirm(null);
+            await loadScripts();
+        } catch (error) {
+            console.error('Failed to delete script:', error);
         }
-    }
+    };
 
     const handleViewKey = async (scriptId) => {
         try {
-            const data = await apiFetch(`/scripts/${scriptId}/key`)
-            setSnippetScript(data)
-        } catch (err) {
-            console.error('Failed to get key:', err)
+            const data = await apiFetch(`/scripts/${scriptId}/key`);
+            setSnippetScript(data);
+        } catch (error) {
+            console.error('Failed to load script key:', error);
         }
-    }
+    };
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-6 h-6 text-panel-accent animate-spin" />
+            <div className="panel-card panel-ring flex h-72 items-center justify-center rounded-[28px]">
+                <LoaderCircle className="h-7 w-7 animate-spin text-panel-accent" />
             </div>
-        )
+        );
     }
 
     return (
-        <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white">Scripts</h1>
-                    <p className="text-sm text-panel-text-muted mt-0.5">Manage your monitored scripts</p>
-                </div>
-                <button
-                    id="add-script-btn"
-                    onClick={() => setShowAdd(!showAdd)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-panel-accent to-panel-accent-dim text-white font-medium text-sm hover:opacity-90 transition-all shadow-md shadow-panel-accent/20 cursor-pointer"
-                >
-                    <Plus className="w-4 h-4" />
-                    Add Script
-                </button>
-            </div>
+        <div className="space-y-5">
+            <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+                <div className="panel-card panel-ring rounded-[28px] px-5 py-6 sm:px-6">
+                    <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Registry</p>
+                    <h1 className="panel-title mt-3 text-3xl font-bold">Manage script identities, shipping keys, and embed snippets.</h1>
+                    <p className="mt-3 max-w-3xl text-sm leading-7 text-panel-text-dim">
+                        Each script gets its own slug and HMAC key. This page should feel like a deployment registry, not a debug panel.
+                    </p>
 
-            {/* Add Script Form */}
+                    <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                        <div className="rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Scripts</p>
+                            <p className="mt-3 text-3xl font-semibold">{scripts.length}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Live users</p>
+                            <p className="mt-3 text-3xl font-semibold">{totalLive}</p>
+                        </div>
+                        <div className="rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Managed auth</p>
+                            <p className="mt-3 text-3xl font-semibold">HMAC</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Action</p>
+                            <h2 className="mt-2 text-xl font-semibold">Register a new script target</h2>
+                            <p className="mt-2 text-sm leading-6 text-panel-text-dim">
+                                New scripts get a unique HMAC key immediately. The integration modal exposes the embed snippet.
+                            </p>
+                        </div>
+                        <button
+                            onClick={() => setShowAdd((value) => !value)}
+                            className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.94),_rgba(245,158,11,0.88))] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(255,107,87,0.24)] transition hover:translate-y-[-1px]"
+                        >
+                            <Plus className="h-4 w-4" />
+                            {showAdd ? 'Hide form' : 'Add script'}
+                        </button>
+                    </div>
+                </div>
+            </section>
+
             {showAdd && (
-                <div className="bg-panel-card border border-panel-border rounded-xl p-5 animate-pulse-glow">
-                    <h3 className="text-sm font-semibold text-white mb-4">Register New Script</h3>
+                <section className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.16),_rgba(103,184,255,0.14))]">
+                            <Wrench className="h-5 w-5 text-panel-accent" />
+                        </div>
+                        <div>
+                            <h3 className="text-xl font-semibold">Register new script</h3>
+                            <p className="text-sm text-panel-text-dim">Keep slug short, stable, and lowercase.</p>
+                        </div>
+                    </div>
+
                     {addError && (
-                        <div className="mb-3 p-2.5 rounded-lg bg-panel-danger/10 border border-panel-danger/20 text-panel-danger text-sm">
+                        <div className="mt-5 rounded-2xl border border-panel-danger/25 bg-panel-danger/10 px-4 py-3 text-sm text-panel-danger">
                             {addError}
                         </div>
                     )}
-                    <form onSubmit={handleAdd} className="flex flex-col sm:flex-row gap-3">
+
+                    <form onSubmit={handleAdd} className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.8fr_auto]">
                         <input
-                            id="script-name"
                             type="text"
-                            placeholder="Display name (e.g. SAB New)"
+                            placeholder="Display name"
                             value={newName}
-                            onChange={(e) => setNewName(e.target.value)}
-                            className="flex-1 px-4 py-2 rounded-lg bg-panel-bg border border-panel-border text-white text-sm placeholder-panel-text-muted focus:outline-none focus:border-panel-accent/50 transition-colors"
+                            onChange={(event) => setNewName(event.target.value)}
+                            className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-white/20"
                             required
                         />
                         <input
-                            id="script-slug"
                             type="text"
-                            placeholder="Slug (e.g. sabnew)"
+                            placeholder="script_slug"
                             value={newSlug}
-                            onChange={(e) => setNewSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                            className="w-48 px-4 py-2 rounded-lg bg-panel-bg border border-panel-border text-white text-sm font-mono placeholder-panel-text-muted focus:outline-none focus:border-panel-accent/50 transition-colors"
+                            onChange={(event) => setNewSlug(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                            className="panel-mono rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-white/20"
                             required
                         />
-                        <div className="flex gap-2">
-                            <button
-                                type="submit"
-                                disabled={addLoading}
-                                className="px-4 py-2 rounded-lg bg-panel-success/20 text-panel-success text-sm font-medium hover:bg-panel-success/30 transition-colors disabled:opacity-50 cursor-pointer"
-                            >
-                                {addLoading ? 'Creating...' : 'Create'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { setShowAdd(false); setAddError('') }}
-                                className="px-4 py-2 rounded-lg bg-panel-card-hover text-panel-text-dim text-sm hover:text-white transition-colors cursor-pointer"
-                            >
-                                Cancel
-                            </button>
-                        </div>
+                        <button
+                            type="submit"
+                            disabled={addLoading}
+                            className="rounded-2xl bg-[linear-gradient(135deg,_rgba(87,217,130,0.9),_rgba(110,231,216,0.84))] px-5 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95 disabled:opacity-60"
+                        >
+                            {addLoading ? 'Creating...' : 'Create'}
+                        </button>
                     </form>
-                </div>
+                </section>
             )}
 
-            {/* Scripts Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {scripts.map(script => (
-                    <div key={script.id} className="bg-panel-card border border-panel-border rounded-xl p-5 hover:border-panel-accent/30 transition-all group">
-                        <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-center gap-2.5">
-                                <div className="w-9 h-9 rounded-lg bg-panel-accent/15 flex items-center justify-center">
-                                    <Code2 className="w-4.5 h-4.5 text-panel-accent" />
+            <section className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+                {scripts.map((script) => (
+                    <article key={script.id} className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.16),_rgba(103,184,255,0.14))]">
+                                    <ShieldCheck className="h-5 w-5 text-panel-accent" />
                                 </div>
-                                <div>
-                                    <h3 className="text-sm font-semibold text-white">{script.name}</h3>
-                                    <p className="text-xs text-panel-text-muted font-mono">{script.slug}</p>
-                                </div>
+                                <h3 className="truncate text-xl font-semibold">{script.name}</h3>
+                                <p className="panel-mono mt-2 text-xs uppercase tracking-[0.24em] text-panel-text-muted">{script.slug}</p>
+                            </div>
+                            <div className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-right">
+                                <p className="panel-mono text-[10px] uppercase tracking-[0.26em] text-panel-text-muted">Live</p>
+                                <p className="mt-2 text-2xl font-semibold">{script.active_users || 0}</p>
                             </div>
                         </div>
 
-                        {/* Active users */}
-                        <div className="flex items-center gap-1.5 mb-4">
-                            <Users className="w-3.5 h-3.5 text-panel-success" />
-                            <span className="text-sm font-semibold text-white">{script.active_users || 0}</span>
-                            <span className="text-xs text-panel-text-muted">active</span>
+                        <div className="mt-5 rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Auth material</p>
+                                    <p className="mt-2 text-sm text-panel-text-dim">Use the integration modal to copy the embed snippet and HMAC key.</p>
+                                </div>
+                                <Sparkles className="h-4 w-4 text-panel-secondary" />
+                            </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-2 pt-3 border-t border-panel-border/50">
+                        <div className="mt-5 flex flex-wrap items-center gap-3">
                             <button
                                 onClick={() => handleViewKey(script.id)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-panel-accent/10 text-panel-accent text-xs font-medium hover:bg-panel-accent/20 transition-colors cursor-pointer"
+                                className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.92),_rgba(245,158,11,0.84))] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(255,107,87,0.2)]"
                             >
-                                <Key className="w-3 h-3" />
+                                <KeyRound className="h-4 w-4" />
                                 Integration
                             </button>
                             <button
-                                onClick={() => setDeleteConfirm(script.id)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-panel-text-muted text-xs hover:bg-panel-danger/10 hover:text-panel-danger transition-all ml-auto cursor-pointer"
+                                onClick={() => setDeleteConfirm(deleteConfirm === script.id ? null : script.id)}
+                                className="inline-flex items-center gap-2 rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-sm text-panel-text-dim transition hover:bg-panel-danger/10 hover:text-panel-danger"
                             >
-                                <Trash2 className="w-3 h-3" />
+                                <Trash2 className="h-4 w-4" />
+                                Delete
                             </button>
                         </div>
 
-                        {/* Delete confirmation */}
                         {deleteConfirm === script.id && (
-                            <div className="mt-3 p-3 rounded-lg bg-panel-danger/10 border border-panel-danger/20">
-                                <p className="text-xs text-panel-danger mb-2">Delete "{script.name}"? This removes all session data.</p>
-                                <div className="flex gap-2">
+                            <div className="mt-4 rounded-[22px] border border-panel-danger/25 bg-panel-danger/10 p-4">
+                                <p className="text-sm text-panel-danger">
+                                    Delete <span className="font-semibold">{script.name}</span>? This removes session history for the script.
+                                </p>
+                                <div className="mt-4 flex gap-3">
                                     <button
                                         onClick={() => handleDelete(script.id)}
-                                        className="px-3 py-1 rounded bg-panel-danger text-white text-xs font-medium hover:bg-panel-danger/80 cursor-pointer"
+                                        className="rounded-xl bg-panel-danger px-4 py-2 text-sm font-semibold text-white"
                                     >
-                                        Delete
+                                        Confirm delete
                                     </button>
                                     <button
                                         onClick={() => setDeleteConfirm(null)}
-                                        className="px-3 py-1 rounded bg-panel-card-hover text-panel-text-dim text-xs hover:text-white cursor-pointer"
+                                        className="rounded-xl border border-panel-border bg-white/[0.04] px-4 py-2 text-sm text-panel-text-dim"
                                     >
                                         Cancel
                                     </button>
                                 </div>
                             </div>
                         )}
-                    </div>
+                    </article>
                 ))}
 
                 {scripts.length === 0 && (
-                    <div className="col-span-full text-center py-12 text-panel-text-muted">
-                        <Code2 className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                        <p className="text-sm">No scripts registered yet</p>
-                        <p className="text-xs mt-1">Click "Add Script" to get started</p>
+                    <div className="panel-card panel-ring col-span-full rounded-[28px] px-5 py-14 text-center">
+                        <ShieldCheck className="mx-auto h-10 w-10 text-panel-text-muted" />
+                        <p className="mt-4 text-lg font-semibold">No scripts registered yet</p>
+                        <p className="mt-2 text-sm text-panel-text-muted">Create one and the panel will generate its HMAC key automatically.</p>
                     </div>
                 )}
-            </div>
+            </section>
 
-            {/* Snippet Modal */}
             {snippetScript && (
-                <LuaSnippetModal script={snippetScript} onClose={() => setSnippetScript(null)} />
+                <IntegrationModal script={snippetScript} onClose={() => setSnippetScript(null)} />
             )}
         </div>
-    )
+    );
 }

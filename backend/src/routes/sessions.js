@@ -5,6 +5,9 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
 const ACTIVE_WINDOW_SQL = `-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`;
+const NORMALIZED_LAST_HEARTBEAT_SQL = "datetime(replace(substr(sess.last_heartbeat, 1, 19), 'T', ' '))";
+const NORMALIZED_FIRST_SEEN_SQL = "datetime(replace(substr(first_seen, 1, 19), 'T', ' '))";
+const NORMALIZED_HEARTBEAT_LOG_SQL = "datetime(replace(substr(timestamp, 1, 19), 'T', ' '))";
 
 router.use(authMiddleware);
 
@@ -20,7 +23,7 @@ router.get('/', (req, res) => {
       SELECT sess.*, s.name as script_name, s.slug as script_slug
       FROM sessions sess
       JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?) AND s.slug = ?
+      WHERE sess.is_active = 1 AND ${NORMALIZED_LAST_HEARTBEAT_SQL} >= datetime('now', ?) AND s.slug = ?
       ORDER BY sess.last_heartbeat DESC
       LIMIT ? OFFSET ?
     `;
@@ -30,7 +33,7 @@ router.get('/', (req, res) => {
       SELECT sess.*, s.name as script_name, s.slug as script_slug
       FROM sessions sess
       JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?)
+      WHERE sess.is_active = 1 AND ${NORMALIZED_LAST_HEARTBEAT_SQL} >= datetime('now', ?)
       ORDER BY sess.last_heartbeat DESC
       LIMIT ? OFFSET ?
     `;
@@ -39,7 +42,7 @@ router.get('/', (req, res) => {
 
     const sessions = db.prepare(query).all(...params);
     const total = db.prepare(
-        "SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND last_heartbeat >= datetime('now', ?)"
+        `SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND datetime(replace(substr(last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)`
     ).get(ACTIVE_WINDOW_SQL).count;
 
     res.json({ sessions, total });
@@ -50,13 +53,13 @@ router.get('/stats', (req, res) => {
     const db = getDb();
 
     const totalActive = db.prepare(
-        "SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND last_heartbeat >= datetime('now', ?)"
+        `SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND datetime(replace(substr(last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)`
     ).get(ACTIVE_WINDOW_SQL).count;
 
     const perScript = db.prepare(`
     SELECT s.name, s.slug, COUNT(sess.id) as active_users
     FROM scripts s
-    LEFT JOIN sessions sess ON sess.script_id = s.id AND sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?)
+    LEFT JOIN sessions sess ON sess.script_id = s.id AND sess.is_active = 1 AND datetime(replace(substr(sess.last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)
     GROUP BY s.id
     ORDER BY active_users DESC
   `).all(ACTIVE_WINDOW_SQL);
@@ -72,16 +75,16 @@ router.get('/stats', (req, res) => {
 
     // Sessions in last 24h
     const last24h = db.prepare(
-        "SELECT COUNT(*) as count FROM sessions WHERE first_seen >= datetime('now', '-24 hours')"
+        `SELECT COUNT(*) as count FROM sessions WHERE ${NORMALIZED_FIRST_SEEN_SQL} >= datetime('now', '-24 hours')`
     ).get().count;
 
     // Hourly activity for chart (last 24 hours)
     const hourlyActivity = db.prepare(`
     SELECT 
-      strftime('%Y-%m-%dT%H:00:00', timestamp) as hour,
+      strftime('%Y-%m-%dT%H:00:00', ${NORMALIZED_HEARTBEAT_LOG_SQL}) as hour,
       COUNT(DISTINCT session_id) as users
     FROM heartbeat_log
-    WHERE timestamp >= datetime('now', '-24 hours')
+    WHERE ${NORMALIZED_HEARTBEAT_LOG_SQL} >= datetime('now', '-24 hours')
     GROUP BY hour
     ORDER BY hour ASC
   `).all();

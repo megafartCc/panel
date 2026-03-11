@@ -1,242 +1,469 @@
 import { useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Users, Activity, Clock, TrendingUp, Search } from 'lucide-react';
+import { Activity, Clock3, Search, Shield, Sparkles, TrendingUp, UserRound, Radar } from 'lucide-react';
 import {
-    Chart as ChartJS,
+    ArcElement,
     CategoryScale,
+    Chart as ChartJS,
+    Filler,
+    Legend,
+    LineElement,
     LinearScale,
     PointElement,
-    LineElement,
-    Title,
     Tooltip as ChartTooltip,
-    Filler,
-    Legend
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Doughnut, Line } from 'react-chartjs-2';
 
 ChartJS.register(
+    ArcElement,
     CategoryScale,
     LinearScale,
     PointElement,
     LineElement,
-    Title,
-    ChartTooltip,
     Filler,
-    Legend
+    Legend,
+    ChartTooltip,
 );
 
+function compact(value) {
+    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0);
+}
+
+function timeSince(dateStr) {
+    if (!dateStr) return 'never';
+    const seconds = Math.max(0, Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000));
+    if (seconds < 10) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+function formatHourLabel(hour) {
+    if (!hour) return '--';
+    const date = new Date(hour);
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric' }).format(date);
+}
+
 export default function Dashboard() {
-    const { sessions, stats } = useOutletContext();
+    const { sessions, stats, connected } = useOutletContext();
     const [search, setSearch] = useState('');
 
-    const activeUsers = sessions?.length || 0;
-    const totalScripts = stats?.scripts?.length || 0;
-    const chartData = stats?.chart || [];
-    const scriptBreakdown = stats?.scripts || [];
+    const activeSessions = sessions || [];
+    const perScript = stats?.perScript || [];
+    const hourlyActivity = stats?.hourlyActivity || [];
+    const totalActive = stats?.totalActive || activeSessions.length || 0;
+    const totalSessions = stats?.totalSessions || 0;
+    const uniqueUsers = stats?.uniqueUsers || 0;
+    const last24h = stats?.last24h || 0;
+    const activePerScript = perScript.filter((script) => (script.active_users || 0) > 0);
+    const peakHour = hourlyActivity.reduce((best, current) => {
+        if (!best || (current.users || 0) > (best.users || 0)) return current;
+        return best;
+    }, null);
 
     const filteredSessions = useMemo(() => {
-        if (!sessions) return [];
-        if (!search) return sessions;
-        const q = search.toLowerCase();
-        return sessions.filter(s =>
-            s.roblox_user?.toLowerCase().includes(q) ||
-            s.script_name?.toLowerCase().includes(q) ||
-            s.executor?.toLowerCase().includes(q)
+        if (!search) return activeSessions;
+        const query = search.toLowerCase();
+        return activeSessions.filter((session) =>
+            session.roblox_user?.toLowerCase().includes(query)
+            || session.roblox_userid?.toLowerCase().includes(query)
+            || session.script_name?.toLowerCase().includes(query)
+            || session.executor?.toLowerCase().includes(query)
         );
-    }, [sessions, search]);
+    }, [activeSessions, search]);
 
-    const statCards = [
-        { label: 'Active Users', value: activeUsers, icon: Users, color: 'from-purple-500 to-blue-500', glow: 'shadow-purple-500/20' },
-        { label: 'Scripts', value: totalScripts, icon: Activity, color: 'from-emerald-500 to-teal-500', glow: 'shadow-emerald-500/20' },
-        { label: 'Peak Today', value: stats?.peakToday || 0, icon: TrendingUp, color: 'from-orange-500 to-amber-500', glow: 'shadow-orange-500/20' },
-        { label: 'Total Sessions', value: stats?.totalSessions || 0, icon: Clock, color: 'from-pink-500 to-rose-500', glow: 'shadow-pink-500/20' },
-    ];
-
-    function timeSince(dateStr) {
-        const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
-        if (seconds < 10) return 'just now';
-        if (seconds < 60) return `${seconds}s ago`;
-        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-        return `${Math.floor(seconds / 3600)}h ago`;
-    }
-
-    // Chart.js Configuration
-    const lineChartData = useMemo(() => {
-        const labels = chartData.map(d => d.hour);
-        const data = chartData.map(d => d.count);
-        const maxValue = data.length ? Math.max(...data) : 0;
+    const lineChartConfig = useMemo(() => {
+        const labels = hourlyActivity.map((entry) => formatHourLabel(entry.hour));
+        const values = hourlyActivity.map((entry) => entry.users || 0);
+        const maxValue = values.length ? Math.max(...values) : 0;
 
         return {
             data: {
                 labels,
                 datasets: [
                     {
-                        label: 'Active Users',
-                        data: data,
-                        borderColor: 'rgba(168, 85, 247, 0.95)', // Purple 500
+                        label: 'Distinct active sessions',
+                        data: values,
+                        borderColor: '#ff7b61',
                         backgroundColor: (context) => {
                             const chart = context.chart;
                             const { ctx, chartArea } = chart;
-                            if (!chartArea) return 'rgba(168, 85, 247, 0.1)';
+                            if (!chartArea) return 'rgba(255, 123, 97, 0.18)';
                             const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-                            gradient.addColorStop(0, 'rgba(168, 85, 247, 0.35)');
-                            gradient.addColorStop(1, 'rgba(168, 85, 247, 0.02)');
+                            gradient.addColorStop(0, 'rgba(255, 123, 97, 0.35)');
+                            gradient.addColorStop(0.45, 'rgba(103, 184, 255, 0.18)');
+                            gradient.addColorStop(1, 'rgba(103, 184, 255, 0.02)');
                             return gradient;
                         },
                         fill: true,
-                        tension: 0.35, // Smooth curves
-                        pointRadius: 0, // Hide points until hover
+                        tension: 0.34,
+                        pointRadius: 0,
                         pointHoverRadius: 5,
-                        pointBackgroundColor: '#a855f7',
-                        borderWidth: 2,
-                    }
-                ]
+                        pointBackgroundColor: '#fff2e8',
+                        pointBorderWidth: 2,
+                        pointBorderColor: '#ff7b61',
+                        borderWidth: 2.4,
+                    },
+                ],
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                interaction: { intersect: false, mode: 'index' },
-                scales: {
-                    x: {
-                        grid: { display: false },
-                        border: { display: false },
-                        ticks: { color: '#ffffff40', font: { size: 11 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
-                    },
-                    y: {
-                        beginAtZero: true,
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        border: { display: false },
-                        ticks: {
-                            color: '#ffffff40',
-                            font: { size: 11 },
-                            stepSize: 1, // Only show integers
-                        },
-                        suggestedMax: maxValue ? Math.ceil(maxValue * 1.15) : 4,
-                    },
-                },
+                interaction: { mode: 'index', intersect: false },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        backgroundColor: '#1a1a2e',
-                        titleColor: '#ffffff80',
-                        bodyColor: '#ffffff',
-                        borderColor: 'rgba(255,255,255,0.1)',
+                        backgroundColor: 'rgba(7, 17, 31, 0.96)',
+                        borderColor: 'rgba(173, 192, 255, 0.18)',
                         borderWidth: 1,
-                        padding: 10,
-                        cornerRadius: 12,
+                        titleColor: '#dfe9ff',
+                        bodyColor: '#ffffff',
+                        padding: 12,
                         displayColors: false,
                         callbacks: {
                             label: (context) => `Users: ${context.parsed.y}`,
                         },
                     },
                 },
-            }
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: {
+                            color: '#7f95b8',
+                            maxTicksLimit: 8,
+                            font: { size: 11, family: 'IBM Plex Mono' },
+                        },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        border: { display: false },
+                        suggestedMax: maxValue ? Math.ceil(maxValue * 1.2) : 4,
+                        ticks: {
+                            color: '#7f95b8',
+                            precision: 0,
+                            font: { size: 11, family: 'IBM Plex Mono' },
+                        },
+                        grid: {
+                            color: 'rgba(173, 192, 255, 0.08)',
+                        },
+                    },
+                },
+            },
         };
-    }, [chartData]);
+    }, [hourlyActivity]);
 
+    const doughnutConfig = useMemo(() => {
+        const topScripts = activePerScript.slice(0, 5);
+        return {
+            data: {
+                labels: topScripts.map((script) => script.name),
+                datasets: [
+                    {
+                        data: topScripts.map((script) => script.active_users || 0),
+                        backgroundColor: ['#ff7b61', '#67b8ff', '#6ee7d8', '#ffba49', '#9ea9ff'],
+                        borderColor: '#08111f',
+                        borderWidth: 4,
+                        hoverOffset: 6,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '72%',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(7, 17, 31, 0.96)',
+                        borderColor: 'rgba(173, 192, 255, 0.18)',
+                        borderWidth: 1,
+                        titleColor: '#dfe9ff',
+                        bodyColor: '#ffffff',
+                        padding: 12,
+                    },
+                },
+            },
+        };
+    }, [activePerScript]);
+
+    const statCards = [
+        {
+            label: 'Live sessions',
+            value: totalActive,
+            helper: connected ? 'Current heartbeat responders' : 'Backend currently disconnected',
+            icon: Radar,
+            tone: 'from-[#ff7b61]/25 to-[#ffba49]/10',
+        },
+        {
+            label: 'Unique users',
+            value: uniqueUsers,
+            helper: 'Distinct Roblox ids observed',
+            icon: UserRound,
+            tone: 'from-[#67b8ff]/24 to-[#67b8ff]/4',
+        },
+        {
+            label: '24h joins',
+            value: last24h,
+            helper: 'Sessions first seen in the last day',
+            icon: Sparkles,
+            tone: 'from-[#6ee7d8]/24 to-[#6ee7d8]/4',
+        },
+        {
+            label: 'Total sessions',
+            value: totalSessions,
+            helper: peakHour ? `Peak hour ${formatHourLabel(peakHour.hour)} with ${peakHour.users}` : 'No peak yet',
+            icon: TrendingUp,
+            tone: 'from-[#9ea9ff]/20 to-[#9ea9ff]/4',
+        },
+    ];
 
     return (
-        <div className="p-8 space-y-8">
-            {/* Header */}
-            <div>
-                <h1 className="text-3xl font-bold">Dashboard</h1>
-                <p className="text-white/40 mt-1">Real-time script analytics — polling every 3s</p>
-            </div>
+        <div className="space-y-5">
+            <section className="panel-card panel-ring overflow-hidden rounded-[28px]">
+                <div className="grid gap-6 px-5 py-6 sm:px-6 xl:grid-cols-[1.35fr_0.95fr] xl:px-8 xl:py-8">
+                    <div className="space-y-6">
+                        <div className="space-y-3">
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.34em] text-panel-text-muted">
+                                Mission feed
+                            </p>
+                            <h1 className="panel-title max-w-3xl text-3xl font-bold sm:text-4xl">
+                                Watch live clients, script spread, and operator health from one surface.
+                            </h1>
+                            <p className="max-w-2xl text-sm leading-7 text-panel-text-dim sm:text-base">
+                                The backend is already feeding enough signal. This view turns it into a usable control room instead
+                                of a pile of cards and a lonely line graph.
+                            </p>
+                        </div>
 
-            {/* Stat Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {statCards.map((card) => (
-                    <div key={card.label} className="bg-panel-card border border-white/5 rounded-2xl p-6 hover:border-white/10 transition-all">
-                        <div className="flex items-center justify-between mb-4">
-                            <span className="text-white/50 text-sm font-medium">{card.label}</span>
-                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${card.color} flex items-center justify-center shadow-lg ${card.glow}`}>
-                                <card.icon className="w-5 h-5 text-white" />
+                        <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+                            {statCards.map((card) => (
+                                <div key={card.label} className="rounded-[24px] border border-panel-border bg-white/[0.035] p-4">
+                                    <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${card.tone}`}>
+                                        <card.icon className="h-5 w-5 text-white" />
+                                    </div>
+                                    <p className="text-sm text-panel-text-dim">{card.label}</p>
+                                    <p className="mt-2 text-3xl font-semibold">{compact(card.value)}</p>
+                                    <p className="mt-2 text-xs leading-5 text-panel-text-muted">{card.helper}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="panel-card-strong animate-panel-float rounded-[28px] px-5 py-5 sm:px-6">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Operator summary</p>
+                                <h2 className="mt-2 text-xl font-semibold">Live pressure</h2>
+                            </div>
+                            <div className={`rounded-full border px-3 py-1.5 panel-mono text-[11px] uppercase tracking-[0.22em] ${
+                                connected ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-red-400/25 bg-red-400/10 text-red-300'
+                            }`}>
+                                {connected ? 'Live' : 'Offline'}
                             </div>
                         </div>
-                        <div className="text-3xl font-bold">{card.value}</div>
-                    </div>
-                ))}
-            </div>
 
-            {/* Chart + Script Breakdown */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Chart */}
-                <div className="lg:col-span-2 bg-panel-card border border-white/5 rounded-2xl p-6">
-                    <h2 className="text-lg font-semibold mb-4">User Activity (24h)</h2>
-                    <div style={{ height: 260 }}>
-                        <Line data={lineChartData.data} options={lineChartData.options} />
-                    </div>
-                </div>
-
-                {/* Script Breakdown */}
-                <div className="bg-panel-card border border-white/5 rounded-2xl p-6">
-                    <h2 className="text-lg font-semibold mb-4">Per Script</h2>
-                    <div className="space-y-3">
-                        {scriptBreakdown.length === 0 && (
-                            <p className="text-white/30 text-sm">No scripts tracked yet</p>
-                        )}
-                        {scriptBreakdown.map((s) => (
-                            <div key={s.slug} className="flex items-center justify-between p-3 rounded-xl bg-white/5">
-                                <span className="font-medium">{s.name}</span>
-                                <span className="text-purple-400 font-bold">{s.activeCount}</span>
+                        <div className="mt-6 space-y-4">
+                            <div className="rounded-[22px] border border-panel-border bg-white/[0.04] p-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-panel-text-dim">Peak activity hour</span>
+                                    <Clock3 className="h-4 w-4 text-panel-text-muted" />
+                                </div>
+                                <div className="mt-3 flex items-end justify-between gap-4">
+                                    <div>
+                                        <p className="text-3xl font-semibold">{peakHour ? formatHourLabel(peakHour.hour) : '--'}</p>
+                                        <p className="mt-1 text-xs text-panel-text-muted">
+                                            {peakHour ? `${peakHour.users} active sessions in that hour bucket` : 'Waiting for more signal'}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.16),_rgba(103,184,255,0.12))] px-3 py-2 panel-mono text-xs text-panel-text-dim">
+                                        24h feed
+                                    </div>
+                                </div>
                             </div>
-                        ))}
+
+                            <div className="rounded-[22px] border border-panel-border bg-white/[0.04] p-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm text-panel-text-dim">Top script saturation</span>
+                                    <Shield className="h-4 w-4 text-panel-text-muted" />
+                                </div>
+                                <div className="mt-4 space-y-3">
+                                    {activePerScript.slice(0, 4).map((script, index) => (
+                                        <div key={script.slug} className="flex items-center gap-3">
+                                            <div className="panel-mono flex h-8 w-8 items-center justify-center rounded-xl border border-panel-border bg-white/[0.04] text-[11px] text-panel-text-muted">
+                                                0{index + 1}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <span className="truncate font-medium">{script.name}</span>
+                                                    <span className="panel-mono text-xs text-panel-text-muted">{script.active_users || 0}</span>
+                                                </div>
+                                                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.06]">
+                                                    <div
+                                                        className="h-full rounded-full bg-[linear-gradient(90deg,_#ff7b61,_#67b8ff)]"
+                                                        style={{
+                                                            width: `${Math.max(8, totalActive ? ((script.active_users || 0) / totalActive) * 100 : 0)}%`,
+                                                        }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {activePerScript.length === 0 && (
+                                        <p className="text-sm text-panel-text-muted">No scripts are reporting yet.</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            {/* Active Users Table */}
-            <div className="bg-panel-card border border-white/5 rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold">Active Users</h2>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+            <section className="grid gap-5 xl:grid-cols-[1.45fr_0.95fr]">
+                <div className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Traffic arc</p>
+                            <h2 className="mt-2 text-xl font-semibold">Distinct active sessions over the last 24 hours</h2>
+                        </div>
+                        <div className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-2">
+                            <p className="panel-mono text-[10px] uppercase tracking-[0.26em] text-panel-text-muted">Current</p>
+                            <p className="mt-1 text-lg font-semibold">{compact(totalActive)}</p>
+                        </div>
+                    </div>
+                    <div className="mt-6 h-[320px]">
+                        <Line data={lineChartConfig.data} options={lineChartConfig.options} />
+                    </div>
+                </div>
+
+                <div className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Composition</p>
+                            <h2 className="mt-2 text-xl font-semibold">Session load by script</h2>
+                        </div>
+                        <div className="rounded-full border border-panel-border px-3 py-1 panel-mono text-[11px] uppercase tracking-[0.22em] text-panel-text-muted">
+                            Top 5
+                        </div>
+                    </div>
+                    <div className="mt-6 grid gap-6 lg:grid-cols-[0.88fr_1.12fr] xl:grid-cols-1 2xl:grid-cols-[0.88fr_1.12fr]">
+                        <div className="mx-auto h-[220px] w-full max-w-[220px]">
+                            {activePerScript.length > 0 ? (
+                                <Doughnut data={doughnutConfig.data} options={doughnutConfig.options} />
+                            ) : (
+                                <div className="flex h-full items-center justify-center rounded-[22px] border border-dashed border-panel-border text-center text-sm text-panel-text-muted">
+                                    Waiting for script activity
+                                </div>
+                            )}
+                        </div>
+                        <div className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
+                            {activePerScript.slice(0, 5).map((script, index) => (
+                                <div key={script.slug} className="rounded-[22px] border border-panel-border bg-white/[0.04] px-4 py-3">
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div className="min-w-0">
+                                            <p className="font-semibold">{script.name}</p>
+                                            <p className="panel-mono mt-1 text-xs uppercase tracking-[0.2em] text-panel-text-muted">
+                                                {script.slug}
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-lg font-semibold">{script.active_users || 0}</p>
+                                            <p className="text-xs text-panel-text-muted">active</p>
+                                        </div>
+                                    </div>
+                                    <div className="mt-3 flex items-center gap-2 text-xs text-panel-text-muted">
+                                        <span className="panel-mono">0{index + 1}</span>
+                                        <div className="h-px flex-1 bg-panel-border" />
+                                        <span>{totalActive ? `${Math.round(((script.active_users || 0) / totalActive) * 100)}% of live load` : 'No live load'}</span>
+                                    </div>
+                                </div>
+                            ))}
+                            {activePerScript.length === 0 && (
+                                <div className="rounded-[22px] border border-dashed border-panel-border px-4 py-6 text-sm text-panel-text-muted">
+                                    Script composition will appear once clients start posting heartbeats.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Live roster</p>
+                        <h2 className="mt-2 text-xl font-semibold">Sessions currently reporting into the panel</h2>
+                        <p className="mt-2 text-sm text-panel-text-dim">
+                            Search by Roblox name, user id, script, or executor. This uses the active session feed directly.
+                        </p>
+                    </div>
+                    <label className="relative block w-full max-w-sm">
+                        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-panel-text-muted" />
                         <input
                             type="text"
-                            placeholder="Search..."
+                            placeholder="Find a session"
                             value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 w-64"
+                            onChange={(event) => setSearch(event.target.value)}
+                            className="w-full rounded-2xl border border-panel-border bg-white/[0.04] py-3 pl-11 pr-4 text-sm text-white outline-none transition focus:border-white/20"
                         />
-                    </div>
+                    </label>
                 </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                            <tr className="text-white/40 text-sm border-b border-white/5">
-                                <th className="text-left py-3 px-4 font-medium">User</th>
-                                <th className="text-left py-3 px-4 font-medium">Script</th>
-                                <th className="text-left py-3 px-4 font-medium">Executor</th>
-                                <th className="text-left py-3 px-4 font-medium">Last Seen</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredSessions.length === 0 && (
-                                <tr>
-                                    <td colSpan={4} className="text-center py-8 text-white/20">
-                                        {search ? 'No matching users' : 'No active users — run a script to see them here'}
-                                    </td>
-                                </tr>
-                            )}
-                            {filteredSessions.map((s) => (
-                                <tr key={s.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                    <td className="py-3 px-4">
+                <div className="mt-6 max-h-[560px] overflow-auto rounded-[22px] border border-panel-border/70">
+                    <div className="min-w-[860px]">
+                        <div className="sticky top-0 z-10 grid grid-cols-[2fr_1.2fr_1fr_1fr] gap-4 border-b border-panel-border bg-[#0a1020] px-4 py-3 panel-mono text-[11px] uppercase tracking-[0.24em] text-panel-text-muted">
+                            <span>User</span>
+                            <span>Script</span>
+                            <span>Executor</span>
+                            <span>Last heartbeat</span>
+                        </div>
+
+                        {filteredSessions.length === 0 ? (
+                            <div className="px-4 py-12 text-center text-panel-text-muted">
+                                {search ? 'No active session matched that query.' : 'No active users are reporting yet.'}
+                            </div>
+                        ) : (
+                            filteredSessions.map((session) => (
+                                <div
+                                    key={session.id}
+                                    className="grid grid-cols-[2fr_1.2fr_1fr_1fr] gap-4 border-b border-panel-border/70 px-4 py-4 transition hover:bg-white/[0.03]"
+                                >
+                                    <div className="min-w-0">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                                            <span className="font-medium">{s.roblox_user}</span>
-                                            <span className="text-xs text-white/30">#{s.roblox_userid}</span>
+                                            <span className="relative flex h-3 w-3">
+                                                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 animate-panel-pulse" />
+                                                <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-300" />
+                                            </span>
+                                            <div className="min-w-0">
+                                                <p className="truncate font-semibold">{session.roblox_user}</p>
+                                                <p className="panel-mono truncate text-xs text-panel-text-muted">
+                                                    #{session.roblox_userid}
+                                                </p>
+                                            </div>
                                         </div>
-                                    </td>
-                                    <td className="py-3 px-4 text-purple-400">{s.script_name}</td>
-                                    <td className="py-3 px-4 text-white/50">{s.executor}</td>
-                                    <td className="py-3 px-4 text-white/50">{timeSince(s.last_heartbeat)}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="truncate font-medium text-[#ffb099]">{session.script_name}</p>
+                                        <p className="panel-mono truncate text-xs text-panel-text-muted">{session.script_slug}</p>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <span className="inline-flex rounded-full border border-panel-border bg-white/[0.04] px-3 py-1 panel-mono text-xs text-panel-text-dim">
+                                            {session.executor || 'Unknown'}
+                                        </span>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="font-medium">{timeSince(session.last_heartbeat)}</p>
+                                        <p className="text-xs text-panel-text-muted">
+                                            first seen {timeSince(session.first_seen)}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
-            </div>
+            </section>
         </div>
     );
 }

@@ -16,7 +16,7 @@ router.get('/', (req, res) => {
     const db = getDb();
     const scripts = db.prepare(`
     SELECT s.*, 
-      (SELECT COUNT(*) FROM sessions sess WHERE sess.script_id = s.id AND sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?)) as active_users
+      (SELECT COUNT(*) FROM sessions sess WHERE sess.script_id = s.id AND sess.is_active = 1 AND datetime(replace(substr(sess.last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)) as active_users
     FROM scripts s
     ORDER BY s.created_at DESC
   `).all(ACTIVE_WINDOW_SQL);

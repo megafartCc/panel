@@ -15,7 +15,7 @@ function startCleanupTimer() {
             const db = getDb();
             const stale = db.prepare(`
                 UPDATE sessions SET is_active = 0
-                WHERE is_active = 1 AND last_heartbeat < datetime('now', ?)
+                WHERE is_active = 1 AND datetime(replace(substr(last_heartbeat, 1, 19), 'T', ' ')) < datetime('now', ?)
             `).run(`-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`);
             if (stale.changes > 0) {
                 console.log(`[Cleanup] Marked ${stale.changes} stale sessions inactive`);

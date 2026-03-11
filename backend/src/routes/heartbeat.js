@@ -5,6 +5,10 @@ const { getDb } = require('../db');
 
 const router = express.Router();
 
+function toSqliteDateTime(date = new Date()) {
+    return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 // POST /api/heartbeat — called by Lua scripts every 10s
 router.post('/', (req, res) => {
     try {
@@ -49,7 +53,7 @@ router.post('/', (req, res) => {
         }
 
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-        const nowIso = new Date().toISOString();
+        const nowIso = toSqliteDateTime();
 
         // Find existing active session for this user + script
         const existing = db.prepare(

@@ -326,7 +326,7 @@ export default function Dashboard() {
                         <div>
                             <p className="section-kicker">Finder</p>
                             <h3 className="section-title mt-2 text-3xl font-semibold text-zinc-950">Active under-7 servers</h3>
-                            <p className="mt-2 text-sm text-zinc-500">Entries expire after 30 seconds unless a new report lands.</p>
+                            <p className="mt-2 text-sm text-zinc-500">Entries expire after 25 seconds unless a new report lands.</p>
                         </div>
                         <div className="flex items-center gap-2 rounded-2xl bg-zinc-100 px-4 py-2 text-sm text-zinc-500">
                             <Radar className="h-4 w-4" />
@@ -337,7 +337,7 @@ export default function Dashboard() {
                     <div className="mt-6 space-y-4">
                         {finderServers.length === 0 && (
                             <div className="card border-dashed px-4 py-6 text-sm text-zinc-500">
-                                No eligible finder servers have reported fresh brainrots in the last 30 seconds.
+                                No eligible finder servers have reported fresh brainrots in the last 25 seconds.
                             </div>
                         )}
 

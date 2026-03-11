@@ -6,7 +6,7 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 const SIGNATURE_WINDOW_SECONDS = 120;
-const FINDER_TTL_SECONDS = Math.max(5, Number(process.env.FINDER_SERVER_TTL_SECONDS) || 30);
+const FINDER_TTL_SECONDS = Math.max(5, Number(process.env.FINDER_SERVER_TTL_SECONDS) || 25);
 const NORMALIZED_DISCOVERED_AT_SQL = "datetime(replace(substr(fr.discovered_at, 1, 19), 'T', ' '))";
 const MAX_BRAINROTS_PER_REQUEST = 100;
 

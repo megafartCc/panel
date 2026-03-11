@@ -5,12 +5,35 @@ export function useWebSocket(onMessage) {
     const [connected, setConnected] = useState(false);
     const reconnectTimeoutRef = useRef(null);
     const onMessageRef = useRef(onMessage);
+    const connectingRef = useRef(false);
 
     onMessageRef.current = onMessage;
+
+    const cleanup = useCallback(() => {
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+        }
+        if (wsRef.current) {
+            wsRef.current.onopen = null;
+            wsRef.current.onmessage = null;
+            wsRef.current.onclose = null;
+            wsRef.current.onerror = null;
+            wsRef.current.close();
+            wsRef.current = null;
+        }
+        connectingRef.current = false;
+    }, []);
 
     const connect = useCallback(() => {
         const token = localStorage.getItem('panel_token');
         if (!token) return;
+
+        // Prevent duplicate connections
+        if (connectingRef.current) return;
+        if (wsRef.current && wsRef.current.readyState <= 1) return; // CONNECTING or OPEN
+
+        connectingRef.current = true;
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws?token=${token}`;
@@ -19,6 +42,7 @@ export function useWebSocket(onMessage) {
         wsRef.current = ws;
 
         ws.onopen = () => {
+            connectingRef.current = false;
             setConnected(true);
             console.log('[WS] Connected');
         };
@@ -28,39 +52,31 @@ export function useWebSocket(onMessage) {
                 const message = JSON.parse(event.data);
                 onMessageRef.current?.(message);
             } catch (e) {
-                console.error('[WS] Failed to parse message:', e);
+                console.error('[WS] Parse error:', e);
             }
         };
 
-        ws.onclose = (event) => {
+        ws.onclose = () => {
+            connectingRef.current = false;
             setConnected(false);
             wsRef.current = null;
-            console.log('[WS] Disconnected, reconnecting in 3s...');
 
-            // Auto-reconnect
+            // Auto-reconnect after 3s
             reconnectTimeoutRef.current = setTimeout(() => {
                 connect();
             }, 3000);
         };
 
-        ws.onerror = (error) => {
-            console.error('[WS] Error:', error);
-            ws.close();
+        ws.onerror = () => {
+            // onclose will fire after this, no need to do anything
         };
     }, []);
 
     useEffect(() => {
+        cleanup();
         connect();
-
-        return () => {
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-            }
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
-        };
-    }, [connect]);
+        return cleanup;
+    }, [connect, cleanup]);
 
     return { connected };
 }

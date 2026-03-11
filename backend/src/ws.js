@@ -165,7 +165,7 @@ function initWebSocket(server) {
                 try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* */ }
             }
         }
-    }, 20000);
+    }, 10000);
 
     console.log('[WS] Dashboard (/ws) + Script (/ws/script) servers initialized');
     console.log(`[WS] Script clients: ${scriptClients.size}, Dashboard clients: ${dashboardClients.size}`);

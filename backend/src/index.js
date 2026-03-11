@@ -6,7 +6,6 @@ const fs = require('fs');
 const http = require('http');
 const helmet = require('helmet');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
 const { migrate } = require('./db');
 const { init } = require('./ws');
 
@@ -31,31 +30,12 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '64kb' }));
 
-// Rate limiters
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 20,
-    message: { error: 'Too many login attempts' }
-});
-
-const heartbeatLimiter = rateLimit({
-    windowMs: 60 * 1000, // per minute
-    max: 30, // 30 heartbeats per minute per IP (generous)
-    message: { error: 'Rate limit exceeded' }
-});
-
-const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 600, // higher for polling
-    message: { error: 'API rate limit exceeded' }
-});
-
 // --- Routes ---
-app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/heartbeat', heartbeatLimiter, heartbeatRoutes);
-app.use('/api/scripts', apiLimiter, scriptsRoutes);
-app.use('/api/sessions', apiLimiter, sessionsRoutes);
-app.use('/api/finder', apiLimiter, finderRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/heartbeat', heartbeatRoutes);
+app.use('/api/scripts', scriptsRoutes);
+app.use('/api/sessions', sessionsRoutes);
+app.use('/api/finder', finderRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -26,9 +26,12 @@ export function usePolling(interval = 3000) {
     }, []);
 
     useEffect(() => {
-        fetchData();
+        const initialTimer = setTimeout(fetchData, 0);
         timerRef.current = setInterval(fetchData, interval);
-        return () => { if (timerRef.current) clearInterval(timerRef.current); };
+        return () => {
+            clearTimeout(initialTimer);
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
     }, [fetchData, interval]);
 
     return { sessions, stats, recent, connected };

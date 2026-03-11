@@ -16,13 +16,17 @@ import { Line, Pie } from 'react-chartjs-2';
 ChartJS.register(ArcElement, CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend, Tooltip);
 
 const RANGE_OPTIONS = [7, 14, 30];
+const EMPTY_LIST = [];
 
 function formatDayLabel(date) {
     return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
 }
 
 export default function Dashboard() {
-    const { sessions, stats, recent } = useOutletContext();
+    const outlet = useOutletContext() || {};
+    const sessions = Array.isArray(outlet.sessions) ? outlet.sessions : EMPTY_LIST;
+    const recent = Array.isArray(outlet.recent) ? outlet.recent : EMPTY_LIST;
+    const stats = outlet.stats || null;
     const [rangeDays, setRangeDays] = useState(7);
 
     const now = new Date();

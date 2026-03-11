@@ -5,12 +5,7 @@ import './index.css'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Layout from './components/Layout'
-
-function ProtectedRoute({ children }) {
-  const token = localStorage.getItem('panel_token')
-  if (!token) return <Navigate to="/login" replace />
-  return children
-}
+import ProtectedRoute from './components/ProtectedRoute'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

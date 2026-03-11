@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Real-time script analytics panel",
     "scripts": {
-        "install:all": "cd backend && npm install && cd ../frontend && npm install",
+        "postinstall": "cd backend && npm install && cd ../frontend && npm install",
         "build": "cd frontend && npm run build",
         "start": "cd backend && node src/index.js",
         "dev:backend": "cd backend && node src/index.js",

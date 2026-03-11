@@ -20,6 +20,7 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
 
 // --- Middleware ---
+app.set('trust proxy', 1); // Railway runs behind a reverse proxy
 app.use(helmet());
 app.use(cors({
     origin: process.env.FRONTEND_URL || true,
@@ -69,6 +70,8 @@ app.get('/sdk/panel_sdk.lua', (req, res) => {
 
 // Serve frontend build in production
 const frontendBuild = path.join(__dirname, '..', '..', 'frontend', 'dist');
+console.log(`[Static] Looking for frontend build at: ${frontendBuild}`);
+console.log(`[Static] Exists: ${fs.existsSync(frontendBuild)}`);
 if (fs.existsSync(frontendBuild)) {
     app.use(express.static(frontendBuild));
     app.get('*', (req, res) => {

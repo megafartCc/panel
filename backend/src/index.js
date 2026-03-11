@@ -8,7 +8,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { migrate } = require('./db');
-const { initWebSocket } = require('./ws');
+const { init } = require('./ws');
 
 const authRoutes = require('./routes/auth');
 const heartbeatRoutes = require('./routes/heartbeat');
@@ -16,37 +16,36 @@ const scriptsRoutes = require('./routes/scripts');
 const sessionsRoutes = require('./routes/sessions');
 
 const app = express();
-const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
 
 // --- Middleware ---
-app.set('trust proxy', 1); // Railway runs behind a reverse proxy
+app.set('trust proxy', 1);
 app.use(helmet({
-    contentSecurityPolicy: false, // React app handles its own CSP
+    contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
 }));
 app.use(cors({
     origin: process.env.FRONTEND_URL || true,
     credentials: true
 }));
-app.use(express.json({ limit: '1kb' })); // Small payload limit — heartbeats are tiny
+app.use(express.json({ limit: '1kb' }));
 
 // Rate limiters
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 20,
-    message: { error: 'Too many login attempts, try again later' }
+    message: { error: 'Too many login attempts' }
 });
 
 const heartbeatLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 200,
+    windowMs: 60 * 1000, // per minute
+    max: 30, // 30 heartbeats per minute per IP (generous)
     message: { error: 'Rate limit exceeded' }
 });
 
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 300,
+    max: 600, // higher for polling
     message: { error: 'API rate limit exceeded' }
 });
 
@@ -81,7 +80,6 @@ if (fs.existsSync(frontendBuild)) {
         res.sendFile(path.join(frontendBuild, 'index.html'));
     });
 } else {
-    // 404 handler (dev mode - frontend served by Vite)
     app.use((req, res) => {
         res.status(404).json({ error: 'Not found' });
     });
@@ -95,10 +93,9 @@ app.use((err, req, res, next) => {
 
 // --- Start ---
 migrate();
-initWebSocket(server);
+init(); // starts the stale session cleanup timer
 
-server.listen(PORT, () => {
-    console.log(`\n🚀 Panel backend running on http://localhost:${PORT}`);
-    console.log(`   WebSocket: ws://localhost:${PORT}/ws`);
+app.listen(PORT, () => {
+    console.log(`\n🚀 Panel running on http://localhost:${PORT}`);
     console.log(`   Health: http://localhost:${PORT}/api/health\n`);
 });

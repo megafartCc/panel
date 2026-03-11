@@ -1,73 +1,75 @@
 const express = require('express');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db');
-const { verifyHmac } = require('../middleware/hmac');
 
 const router = express.Router();
 
-// POST /api/heartbeat
-router.post('/', verifyHmac, (req, res) => {
-    const { user, userid, executor, jobid } = req.body;
-    const scriptRow = req.scriptRow;
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+// POST /api/heartbeat — called by Lua scripts every 10s
+router.post('/', (req, res) => {
+    try {
+        const { script, user, userid, executor, jobid, timestamp, signature } = req.body;
 
-    // Validate fields
-    if (!user || !userid) {
-        return res.status(400).json({ error: 'Missing user or userid' });
-    }
-
-    if (typeof user !== 'string' || user.length > 64) {
-        return res.status(400).json({ error: 'Invalid user field' });
-    }
-
-    const db = getDb();
-
-    // Find existing active session for this user + script
-    const existingSession = db.prepare(
-        'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1'
-    ).get(scriptRow.id, String(userid));
-
-    let sessionId;
-    const now = new Date().toISOString();
-
-    if (existingSession) {
-        sessionId = existingSession.id;
-        db.prepare(
-            'UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, ip_address = ? WHERE id = ?'
-        ).run(now, executor || 'Unknown', jobid || '', ip, sessionId);
-    } else {
-        sessionId = uuidv4();
-        db.prepare(
-            `INSERT INTO sessions (id, script_id, roblox_user, roblox_userid, executor, server_jobid, ip_address, first_seen, last_heartbeat, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
-        ).run(sessionId, scriptRow.id, user, String(userid), executor || 'Unknown', jobid || '', ip, now, now);
-    }
-
-    // Log heartbeat
-    db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(sessionId, now);
-
-    // Broadcast via WebSocket
-    const { broadcast } = require('../ws');
-    const eventType = existingSession ? 'session:heartbeat' : 'session:join';
-
-    // Get the script slug for the broadcast
-    const scriptInfo = db.prepare('SELECT slug, name FROM scripts WHERE id = ?').get(scriptRow.id);
-
-    broadcast({
-        type: eventType,
-        data: {
-            sessionId,
-            script: scriptInfo?.slug || 'unknown',
-            scriptName: scriptInfo?.name || 'Unknown',
-            user,
-            userid: String(userid),
-            executor: executor || 'Unknown',
-            jobid: jobid || '',
-            timestamp: now
+        if (!script || !user || !userid || !timestamp || !signature) {
+            return res.status(400).json({ error: 'Missing fields' });
         }
-    });
 
-    res.json({ ok: true, sessionId });
+        // Timestamp check (120s window)
+        const now = Math.floor(Date.now() / 1000);
+        const ts = parseInt(timestamp, 10);
+        if (isNaN(ts) || Math.abs(now - ts) > 120) {
+            return res.status(400).json({ error: 'Invalid timestamp' });
+        }
+
+        // Look up script
+        const db = getDb();
+        const scriptRow = db.prepare('SELECT id, hmac_key, name, slug FROM scripts WHERE slug = ?').get(script);
+        if (!scriptRow) {
+            return res.status(404).json({ error: 'Script not found' });
+        }
+
+        // Verify HMAC
+        const message = `${script}:${userid}:${timestamp}`;
+        const expectedSig = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
+
+        try {
+            if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+                return res.status(401).json({ error: 'Invalid signature' });
+            }
+        } catch {
+            return res.status(401).json({ error: 'Invalid signature' });
+        }
+
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+        const nowIso = new Date().toISOString();
+
+        // Find existing active session for this user + script
+        const existing = db.prepare(
+            'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1'
+        ).get(scriptRow.id, String(userid));
+
+        let sessionId;
+
+        if (existing) {
+            sessionId = existing.id;
+            db.prepare('UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, ip_address = ? WHERE id = ?')
+                .run(nowIso, executor || 'Unknown', jobid || '', ip, sessionId);
+        } else {
+            sessionId = uuidv4();
+            db.prepare(
+                `INSERT INTO sessions (id, script_id, roblox_user, roblox_userid, executor, server_jobid, ip_address, first_seen, last_heartbeat, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+            ).run(sessionId, scriptRow.id, user, String(userid), executor || 'Unknown', jobid || '', ip, nowIso, nowIso);
+        }
+
+        // Log heartbeat
+        db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(sessionId, nowIso);
+
+        res.json({ ok: true, sessionId });
+    } catch (err) {
+        console.error('[Heartbeat] Error:', err.message);
+        res.status(500).json({ error: 'Internal error' });
+    }
 });
 
 module.exports = router;

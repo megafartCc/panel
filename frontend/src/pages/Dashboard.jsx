@@ -11,9 +11,19 @@ import {
     PointElement,
     Tooltip,
 } from 'chart.js';
+import * as ChartJSPlugins from 'chart.js';
 import { Line, Pie } from 'react-chartjs-2';
 
-ChartJS.register(ArcElement, CategoryScale, LinearScale, PointElement, LineElement, Filler, Legend, Tooltip);
+ChartJS.register(
+    ArcElement,
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    ...(ChartJSPlugins.Filler ? [ChartJSPlugins.Filler] : []),
+    Legend,
+    Tooltip,
+);
 
 const RANGE_OPTIONS = [7, 14, 30];
 const EMPTY_LIST = [];

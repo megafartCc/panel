@@ -1,7 +1,9 @@
+import { clearPanelToken, getPanelToken, setPanelToken } from './storage';
+
 const API_BASE = '/api';
 
 export async function apiFetch(path, options = {}) {
-    const token = localStorage.getItem('panel_token');
+    const token = getPanelToken();
     const headers = {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -14,7 +16,7 @@ export async function apiFetch(path, options = {}) {
     });
 
     if (res.status === 401) {
-        localStorage.removeItem('panel_token');
+        clearPanelToken();
         window.location.href = '/login';
         throw new Error('Unauthorized');
     }
@@ -33,11 +35,11 @@ export async function login(username, password) {
         method: 'POST',
         body: JSON.stringify({ username, password })
     });
-    localStorage.setItem('panel_token', data.token);
+    setPanelToken(data.token);
     return data;
 }
 
 export function logout() {
-    localStorage.removeItem('panel_token');
+    clearPanelToken();
     window.location.href = '/login';
 }

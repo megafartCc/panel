@@ -4,19 +4,21 @@ import { apiFetch } from '../lib/api';
 export function usePolling(interval = 3000) {
     const [sessions, setSessions] = useState([]);
     const [stats, setStats] = useState(null);
+    const [recent, setRecent] = useState([]);
     const [connected, setConnected] = useState(false);
     const timerRef = useRef(null);
 
     const fetchData = useCallback(async () => {
         try {
-            // apiFetch already prepends /api and returns parsed JSON
-            const [sessData, statsData] = await Promise.all([
+            const [sessData, statsData, recentData] = await Promise.all([
                 apiFetch('/sessions'),
-                apiFetch('/sessions/stats')
+                apiFetch('/sessions/stats'),
+                apiFetch('/sessions/recent?limit=250'),
             ]);
 
             setSessions(sessData.sessions || []);
             setStats(statsData);
+            setRecent(recentData || []);
             setConnected(true);
         } catch {
             setConnected(false);
@@ -24,10 +26,13 @@ export function usePolling(interval = 3000) {
     }, []);
 
     useEffect(() => {
-        fetchData();
+        const initialTimer = setTimeout(fetchData, 0);
         timerRef.current = setInterval(fetchData, interval);
-        return () => { if (timerRef.current) clearInterval(timerRef.current); };
+        return () => {
+            clearTimeout(initialTimer);
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
     }, [fetchData, interval]);
 
-    return { sessions, stats, connected };
+    return { sessions, stats, recent, connected };
 }

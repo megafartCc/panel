@@ -1,10 +1,11 @@
 --[[
-  Panel SDK — Lightweight heartbeat module for Roblox scripts
-  Sends HMAC-signed heartbeats to the analytics panel every 30 seconds.
+  Panel SDK v2 — WebSocket-based real-time presence
+  Uses persistent WebSocket connection (zero polling overhead).
+  Falls back to HTTP heartbeats if WebSocket is unavailable.
   
   Usage:
-    local sdk = loadstring(game:HttpGet(PANEL_URL .. "/sdk/panel_sdk.lua"))()
-    sdk.init(PANEL_URL, "script_slug", "hmac_key")
+    local PanelSDK = loadstring(game:HttpGet(PANEL_URL .. "/sdk/panel_sdk.lua"))()
+    PanelSDK.init(PANEL_URL, "script_slug", "hmac_key")
 ]]
 
 local PanelSDK = {}
@@ -13,139 +14,173 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local lp = Players.LocalPlayer
 
--- Minimal HMAC-SHA256 using bit32 ops (pure Lua, no external deps)
--- We use a simplified approach: send the message components and let
--- the server verify. For Roblox, we compute HMAC via a helper.
-
-local function hmac_sha256(key, message)
-    -- Use syn.crypt or crypt if available (most modern executors have this)
-    if syn and syn.crypt and syn.crypt.custom then
-        local ok, result = pcall(function()
-            return syn.crypt.custom.hash("sha256", message, key)
-        end)
-        if ok then return result end
-    end
-    
-    if crypt and crypt.hmac then
-        local ok, result = pcall(function()
-            return crypt.hmac(message, key, "sha256")
-        end)
-        if ok then return result end
-    end
-    
-    -- Fallback for executors with request() that supports headers
-    -- We'll send the raw components and use a simpler signing approach
-    if hash and type(hash) == "function" then
-        local ok, result = pcall(function()
-            return hash("sha256", key .. message)
-        end)
-        if ok then return result end
-    end
-    
-    -- Last resort: use the executor's built-in HMAC
+-- ============================================
+-- HMAC helper (multi-executor compat)
+-- ============================================
+local function computeHmac(key, message)
+    -- Synapse X / Synapse Z
     if syn and syn.crypt and syn.crypt.hmac then
-        local ok, result = pcall(function()
-            return syn.crypt.hmac("sha256", message, key)
-        end)
-        if ok then return result end
+        local ok, r = pcall(syn.crypt.hmac, "sha256", message, key)
+        if ok and r then return r end
     end
-    
-    -- Wave/Fluxus style
-    if crypt and crypt.generatekey then
-        local ok, result = pcall(function()
-            local h = crypt.hmac(message, key, "sha256")
-            return h
-        end)
-        if ok then return result end
+    if syn and syn.crypt and syn.crypt.custom and syn.crypt.custom.hash then
+        local ok, r = pcall(syn.crypt.custom.hash, "sha256", message, key)
+        if ok and r then return r end
     end
-    
+    -- Fluxus / Wave / generic crypt
+    if crypt and crypt.hmac then
+        local ok, r = pcall(crypt.hmac, message, key, "sha256")
+        if ok and r then return r end
+    end
+    -- Scriptware
+    if hash and type(hash) == "function" then
+        local ok, r = pcall(hash, "sha256", key .. message)
+        if ok and r then return r end
+    end
     return nil
 end
 
 local function getExecutorName()
-    local names = {
-        {"identifyexecutor", identifyexecutor},
-        {"getexecutorname", getexecutorname},
-    }
-    for _, pair in ipairs(names) do
-        if type(pair[2]) == "function" then
-            local ok, name = pcall(pair[2])
+    for _, fn in ipairs({identifyexecutor, getexecutorname}) do
+        if type(fn) == "function" then
+            local ok, name = pcall(fn)
             if ok and name then return tostring(name) end
         end
     end
     return "Unknown"
 end
 
-local function sendHeartbeat(panelUrl, scriptSlug, hmacKey)
-    local ok, err = pcall(function()
-        local timestamp = tostring(math.floor(os.time()))
-        local message = scriptSlug .. ":" .. tostring(lp.UserId) .. ":" .. timestamp
-        local signature = hmac_sha256(hmacKey, message)
+-- ============================================
+-- Build the identify payload
+-- ============================================
+local function buildIdentifyPayload(scriptSlug, hmacKey)
+    local timestamp = tostring(math.floor(os.time()))
+    local userid = tostring(lp.UserId)
+    local message = scriptSlug .. ":" .. userid .. ":" .. timestamp
+    local signature = computeHmac(hmacKey, message)
+    if not signature then return nil end
+    
+    return HttpService:JSONEncode({
+        type = "identify",
+        script = scriptSlug,
+        user = lp.Name,
+        userid = userid,
+        executor = getExecutorName(),
+        jobid = game.JobId or "",
+        timestamp = timestamp,
+        signature = signature
+    })
+end
+
+-- ============================================
+-- WebSocket connection (primary)
+-- ============================================
+local function connectWebSocket(panelUrl, scriptSlug, hmacKey)
+    if not WebSocket or not WebSocket.connect then
+        return false
+    end
+    
+    local wsUrl = panelUrl:gsub("^http", "ws") .. "/ws/script"
+    
+    local ok, ws = pcall(WebSocket.connect, wsUrl)
+    if not ok or not ws then
+        return false
+    end
+    
+    -- Send identify message
+    local payload = buildIdentifyPayload(scriptSlug, hmacKey)
+    if not payload then
+        pcall(function() ws:Close() end)
+        return false
+    end
+    
+    local identified = false
+    
+    ws.OnMessage:Connect(function(msg)
+        local s, data = pcall(HttpService.JSONDecode, HttpService, msg)
+        if not s then return end
         
-        if not signature then
-            warn("[Panel SDK] HMAC computation failed — heartbeat skipped")
-            return
-        end
-        
-        local payload = HttpService:JSONEncode({
-            script = scriptSlug,
-            user = lp.Name,
-            userid = tostring(lp.UserId),
-            executor = getExecutorName(),
-            jobid = game.JobId or "",
-            timestamp = timestamp,
-            signature = signature
-        })
-        
-        -- Try multiple HTTP methods (executor compatibility)
-        local sent = false
-        
-        -- Method 1: request() / http_request() / syn.request()
-        local requestFn = request or http_request or (syn and syn.request) or httprequest
-        if requestFn and not sent then
-            local s, _ = pcall(function()
-                requestFn({
-                    Url = panelUrl .. "/api/heartbeat",
-                    Method = "POST",
-                    Headers = {
-                        ["Content-Type"] = "application/json"
-                    },
-                    Body = payload
-                })
-            end)
-            if s then sent = true end
-        end
-        
-        -- Method 2: HttpPost if available
-        if not sent then
+        if data.type == "identified" then
+            identified = true
+        elseif data.type == "ping" then
+            -- Server keepalive ping, respond with pong + heartbeat
             pcall(function()
-                game:HttpPost(panelUrl .. "/api/heartbeat", payload, "application/json")
+                ws:Send(HttpService:JSONEncode({ type = "ping" }))
             end)
         end
     end)
     
-    if not ok then
-        -- Silent fail — never crash the parent script
+    ws.OnClose:Connect(function()
+        -- Auto-reconnect after 5 seconds
+        task.delay(5, function()
+            pcall(connectWebSocket, panelUrl, scriptSlug, hmacKey)
+        end)
+    end)
+    
+    pcall(function() ws:Send(payload) end)
+    
+    -- Store reference so we can close on unload
+    PanelSDK._ws = ws
+    PanelSDK._connected = true
+    
+    return true
+end
+
+-- ============================================
+-- HTTP heartbeat fallback (if no WebSocket)
+-- ============================================
+local function httpHeartbeatLoop(panelUrl, scriptSlug, hmacKey)
+    while true do
+        pcall(function()
+            local timestamp = tostring(math.floor(os.time()))
+            local userid = tostring(lp.UserId)
+            local message = scriptSlug .. ":" .. userid .. ":" .. timestamp
+            local signature = computeHmac(hmacKey, message)
+            if not signature then return end
+            
+            local payload = HttpService:JSONEncode({
+                script = scriptSlug,
+                user = lp.Name,
+                userid = userid,
+                executor = getExecutorName(),
+                jobid = game.JobId or "",
+                timestamp = timestamp,
+                signature = signature
+            })
+            
+            local requestFn = request or http_request or (syn and syn.request) or httprequest
+            if requestFn then
+                requestFn({
+                    Url = panelUrl .. "/api/heartbeat",
+                    Method = "POST",
+                    Headers = { ["Content-Type"] = "application/json" },
+                    Body = payload
+                })
+            end
+        end)
+        task.wait(30)
     end
 end
 
+-- ============================================
+-- Public API
+-- ============================================
 function PanelSDK.init(panelUrl, scriptSlug, hmacKey)
     if not panelUrl or not scriptSlug or not hmacKey then
-        warn("[Panel SDK] Missing configuration — heartbeat disabled")
         return
     end
     
-    -- Strip trailing slash
     panelUrl = panelUrl:gsub("/$", "")
     
-    -- Send initial heartbeat
     task.spawn(function()
-        task.wait(2) -- Small delay to let script initialize
-        sendHeartbeat(panelUrl, scriptSlug, hmacKey)
+        task.wait(2) -- Let the script initialize first
         
-        -- Then send every 30 seconds
-        while task.wait(30) do
-            sendHeartbeat(panelUrl, scriptSlug, hmacKey)
+        -- Try WebSocket first (much more efficient)
+        local wsOk = pcall(connectWebSocket, panelUrl, scriptSlug, hmacKey)
+        
+        if not wsOk or not PanelSDK._connected then
+            -- Fallback to HTTP heartbeats
+            httpHeartbeatLoop(panelUrl, scriptSlug, hmacKey)
         end
     end)
 end

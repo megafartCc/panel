@@ -1,7 +1,29 @@
 import { useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Users, Activity, Clock, TrendingUp, Search } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    Title,
+    Tooltip as ChartTooltip,
+    Filler,
+    Legend
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    Title,
+    ChartTooltip,
+    Filler,
+    Legend
+);
 
 export default function Dashboard() {
     const { sessions, stats } = useOutletContext();
@@ -38,6 +60,81 @@ export default function Dashboard() {
         return `${Math.floor(seconds / 3600)}h ago`;
     }
 
+    // Chart.js Configuration
+    const lineChartData = useMemo(() => {
+        const labels = chartData.map(d => d.hour);
+        const data = chartData.map(d => d.count);
+        const maxValue = data.length ? Math.max(...data) : 0;
+
+        return {
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Active Users',
+                        data: data,
+                        borderColor: 'rgba(168, 85, 247, 0.95)', // Purple 500
+                        backgroundColor: (context) => {
+                            const chart = context.chart;
+                            const { ctx, chartArea } = chart;
+                            if (!chartArea) return 'rgba(168, 85, 247, 0.1)';
+                            const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                            gradient.addColorStop(0, 'rgba(168, 85, 247, 0.35)');
+                            gradient.addColorStop(1, 'rgba(168, 85, 247, 0.02)');
+                            return gradient;
+                        },
+                        fill: true,
+                        tension: 0.35, // Smooth curves
+                        pointRadius: 0, // Hide points until hover
+                        pointHoverRadius: 5,
+                        pointBackgroundColor: '#a855f7',
+                        borderWidth: 2,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { intersect: false, mode: 'index' },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        border: { display: false },
+                        ticks: { color: '#ffffff40', font: { size: 11 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        border: { display: false },
+                        ticks: {
+                            color: '#ffffff40',
+                            font: { size: 11 },
+                            stepSize: 1, // Only show integers
+                        },
+                        suggestedMax: maxValue ? Math.ceil(maxValue * 1.15) : 4,
+                    },
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#1a1a2e',
+                        titleColor: '#ffffff80',
+                        bodyColor: '#ffffff',
+                        borderColor: 'rgba(255,255,255,0.1)',
+                        borderWidth: 1,
+                        padding: 10,
+                        cornerRadius: 12,
+                        displayColors: false,
+                        callbacks: {
+                            label: (context) => `Users: ${context.parsed.y}`,
+                        },
+                    },
+                },
+            }
+        };
+    }, [chartData]);
+
+
     return (
         <div className="p-8 space-y-8">
             {/* Header */}
@@ -66,23 +163,9 @@ export default function Dashboard() {
                 {/* Chart */}
                 <div className="lg:col-span-2 bg-panel-card border border-white/5 rounded-2xl p-6">
                     <h2 className="text-lg font-semibold mb-4">User Activity (24h)</h2>
-                    <ResponsiveContainer width="100%" height={260}>
-                        <AreaChart data={chartData}>
-                            <defs>
-                                <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3} />
-                                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
-                                </linearGradient>
-                            </defs>
-                            <XAxis dataKey="hour" stroke="#ffffff20" fontSize={12} tickLine={false} />
-                            <YAxis stroke="#ffffff20" fontSize={12} tickLine={false} allowDecimals={false} />
-                            <Tooltip
-                                contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                                labelStyle={{ color: '#ffffff80' }}
-                            />
-                            <Area type="monotone" dataKey="count" stroke="#a855f7" fill="url(#colorUsers)" strokeWidth={2} />
-                        </AreaChart>
-                    </ResponsiveContainer>
+                    <div style={{ height: 260 }}>
+                        <Line data={lineChartData.data} options={lineChartData.options} />
+                    </div>
                 </div>
 
                 {/* Script Breakdown */}

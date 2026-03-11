@@ -76,14 +76,21 @@ function migrate() {
         console.log(`[DB] Created default admin user: ${adminUser}`);
     }
 
-    // Seed a default script entry for SAB if none exists
-    const existingScript = conn.prepare('SELECT id FROM scripts WHERE slug = ?').get('sabnew');
+    // Seed or sync the default SAB script entry from env when provided.
+    const sabnewEnvKey = process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY;
+    const existingScript = conn.prepare('SELECT id, hmac_key FROM scripts WHERE slug = ?').get('sabnew');
     if (!existingScript) {
-        const hmacKey = crypto.randomBytes(32).toString('hex');
+        const hmacKey = sabnewEnvKey || crypto.randomBytes(32).toString('hex');
         conn.prepare('INSERT INTO scripts (id, name, slug, hmac_key) VALUES (?, ?, ?, ?)').run(
             uuidv4(), 'SAB New', 'sabnew', hmacKey
         );
         console.log(`[DB] Created default script: SAB New (slug: sabnew)`);
+        if (sabnewEnvKey) {
+            console.log('[DB] Using SABNEW_HMAC_KEY from environment');
+        }
+    } else if (sabnewEnvKey && existingScript.hmac_key !== sabnewEnvKey) {
+        conn.prepare('UPDATE scripts SET hmac_key = ? WHERE slug = ?').run(sabnewEnvKey, 'sabnew');
+        console.log('[DB] Synced sabnew hmac_key from environment');
     }
 
     console.log('[DB] Migrations complete');

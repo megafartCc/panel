@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import React from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Activity, CalendarDays, CalendarRange, CalendarClock, Code2 } from 'lucide-react';
 import {
@@ -37,14 +37,14 @@ export default function Dashboard() {
     const sessions = Array.isArray(outlet.sessions) ? outlet.sessions : EMPTY_LIST;
     const recent = Array.isArray(outlet.recent) ? outlet.recent : EMPTY_LIST;
     const stats = outlet.stats || null;
-    const [rangeDays, setRangeDays] = useState(7);
+    const [rangeDays, setRangeDays] = React.useState(7);
 
     const now = new Date();
     const dailyCount = recent.filter((session) => new Date(session.first_seen) >= new Date(now.getTime() - 24 * 60 * 60 * 1000)).length;
     const weeklyCount = recent.filter((session) => new Date(session.first_seen) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)).length;
     const monthlyCount = recent.filter((session) => new Date(session.first_seen) >= new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)).length;
 
-    const lineConfig = useMemo(() => {
+    const lineConfig = React.useMemo(() => {
         const days = Array.from({ length: rangeDays }).map((_, index) => {
             const date = new Date();
             date.setDate(date.getDate() - (rangeDays - 1 - index));
@@ -124,7 +124,7 @@ export default function Dashboard() {
         };
     }, [recent, rangeDays]);
 
-    const scriptsConnectedPieConfig = useMemo(() => {
+    const scriptsConnectedPieConfig = React.useMemo(() => {
         const perScript = stats?.perScript || [];
         return {
             data: {

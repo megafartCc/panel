@@ -152,6 +152,9 @@ export default function Dashboard() {
         { label: 'Monthly connections', value: monthlyCount, icon: CalendarClock },
     ];
 
+    const hasTrendData = lineConfig.data.datasets[0].data.some((value) => value > 0);
+    const hasScriptData = scriptsConnectedPieConfig.data.datasets[0].data.some((value) => value > 0);
+
     return (
         <div className="space-y-6">
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -191,7 +194,13 @@ export default function Dashboard() {
                         </div>
                     </div>
                     <div className="h-[320px]">
-                        <Line data={lineConfig.data} options={lineConfig.options} />
+                        {hasTrendData ? (
+                            <Line data={lineConfig.data} options={lineConfig.options} />
+                        ) : (
+                            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
+                                No connection trend data yet.
+                            </div>
+                        )}
                     </div>
                 </article>
 
@@ -204,7 +213,13 @@ export default function Dashboard() {
                         <Code2 className="h-5 w-5 text-slate-400" />
                     </div>
                     <div className="h-[320px]">
-                        <Pie data={scriptsConnectedPieConfig.data} options={scriptsConnectedPieConfig.options} />
+                        {hasScriptData ? (
+                            <Pie data={scriptsConnectedPieConfig.data} options={scriptsConnectedPieConfig.options} />
+                        ) : (
+                            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
+                                No active script data yet.
+                            </div>
+                        )}
                     </div>
                 </article>
             </section>

@@ -1,5 +1,6 @@
 const { getDb } = require('./db');
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
+const FINDER_RETENTION_SECONDS = Math.max(60, Number(process.env.FINDER_RETENTION_SECONDS) || 600);
 
 // ============================================
 // Simple approach: Lua scripts POST heartbeat
@@ -19,6 +20,14 @@ function startCleanupTimer() {
             `).run(`-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`);
             if (stale.changes > 0) {
                 console.log(`[Cleanup] Marked ${stale.changes} stale sessions inactive`);
+            }
+
+            const staleFinder = db.prepare(`
+                DELETE FROM finder_reports
+                WHERE datetime(replace(substr(discovered_at, 1, 19), 'T', ' ')) < datetime('now', ?)
+            `).run(`-${FINDER_RETENTION_SECONDS} seconds`);
+            if (staleFinder.changes > 0) {
+                console.log(`[Cleanup] Pruned ${staleFinder.changes} stale finder rows`);
             }
         } catch (err) {
             console.error('[Cleanup] Error:', err.message);

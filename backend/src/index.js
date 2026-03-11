@@ -14,6 +14,7 @@ const authRoutes = require('./routes/auth');
 const heartbeatRoutes = require('./routes/heartbeat');
 const scriptsRoutes = require('./routes/scripts');
 const sessionsRoutes = require('./routes/sessions');
+const finderRoutes = require('./routes/finder');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,7 +29,7 @@ app.use(cors({
     origin: process.env.FRONTEND_URL || true,
     credentials: true
 }));
-app.use(express.json({ limit: '1kb' }));
+app.use(express.json({ limit: '64kb' }));
 
 // Rate limiters
 const authLimiter = rateLimit({
@@ -54,6 +55,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/heartbeat', heartbeatLimiter, heartbeatRoutes);
 app.use('/api/scripts', apiLimiter, scriptsRoutes);
 app.use('/api/sessions', apiLimiter, sessionsRoutes);
+app.use('/api/finder', apiLimiter, finderRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

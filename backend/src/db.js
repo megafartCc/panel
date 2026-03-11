@@ -83,11 +83,30 @@ function migrate() {
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS finder_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      script_id TEXT NOT NULL,
+      server_jobid TEXT NOT NULL,
+      place_id TEXT DEFAULT '',
+      reported_by_user TEXT DEFAULT '',
+      reported_by_userid TEXT DEFAULT '',
+      executor TEXT DEFAULT 'Unknown',
+      player_count INTEGER DEFAULT 0,
+      brainrot_key TEXT NOT NULL,
+      brainrot_name TEXT NOT NULL,
+      money_per_sec REAL DEFAULT 0,
+      discovered_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
+      UNIQUE(script_id, server_jobid, brainrot_key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
     CREATE INDEX IF NOT EXISTS idx_sessions_script ON sessions(script_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_last_hb ON sessions(last_heartbeat);
     CREATE INDEX IF NOT EXISTS idx_heartbeat_log_ts ON heartbeat_log(timestamp);
     CREATE INDEX IF NOT EXISTS idx_heartbeat_log_session ON heartbeat_log(session_id);
+    CREATE INDEX IF NOT EXISTS idx_finder_reports_script_time ON finder_reports(script_id, discovered_at);
+    CREATE INDEX IF NOT EXISTS idx_finder_reports_server_time ON finder_reports(server_jobid, discovered_at);
   `);
 
     // Seed default admin if none exists
@@ -108,7 +127,7 @@ function migrate() {
             name: 'SAB New',
             slug: 'sabnew',
             envName: 'SABNEW_HMAC_KEY',
-            envKey: process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY || sharedEnvKey,
+            envKey: process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
         },
         {
             name: 'Fisch',

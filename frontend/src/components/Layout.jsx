@@ -21,12 +21,7 @@ export default function Layout() {
         <div className="min-h-screen bg-[#f6f8fc] text-slate-900">
             <div className="mx-auto flex min-h-screen w-full max-w-[1700px] gap-6 p-4 lg:p-6">
                 <aside className="hidden w-[280px] shrink-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_20px_45px_rgba(15,23,42,0.08)] lg:flex lg:flex-col">
-                    <div className="border-l-4 border-sky-500 pl-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">FunPay Automation v2</p>
-                        <p className="mt-2 text-sm text-slate-500">Connections, scripts, and player traffic in one place.</p>
-                    </div>
-
-                    <nav className="mt-8 space-y-2">
+                    <nav className="space-y-2">
                         {navItems.map((item) => (
                             <NavLink
                                 key={item.to}

@@ -325,7 +325,7 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between gap-4">
                         <div>
                             <p className="section-kicker">Finder</p>
-                            <h3 className="section-title mt-2 text-3xl font-semibold text-zinc-950">Active under-6 servers</h3>
+                            <h3 className="section-title mt-2 text-3xl font-semibold text-zinc-950">Active under-7 servers</h3>
                             <p className="mt-2 text-sm text-zinc-500">Entries expire after 30 seconds unless a new report lands.</p>
                         </div>
                         <div className="flex items-center gap-2 rounded-2xl bg-zinc-100 px-4 py-2 text-sm text-zinc-500">
@@ -346,7 +346,7 @@ export default function Dashboard() {
                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                     <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-2">
-                                            <span className="badge">{server.playerCount || 0}/6 players</span>
+                                            <span className="badge">{server.playerCount || 0}/7 threshold</span>
                                             <span className="badge">{timeSince(server.lastSeen)}</span>
                                             <span className="badge">{server.reportedByUser || 'Anonymous scout'}</span>
                                         </div>
@@ -401,7 +401,7 @@ export default function Dashboard() {
                             </div>
                             <p className="mt-4 text-xl font-semibold text-zinc-950">{finderServers[0]?.reportedByUser || '--'}</p>
                             <p className="mt-2 text-sm text-zinc-400">
-                                {finderServers[0] ? `${finderServers[0].playerCount || 0}/6 players` : 'No active scout'}
+                                {finderServers[0] ? `${finderServers[0].playerCount || 0}/7 threshold` : 'No active scout'}
                             </p>
                         </div>
                         <div className="card surface-soft p-4">

@@ -194,7 +194,7 @@ router.post('/', (req, res) => {
         }
 
         const normalizedPlayerCount = Math.max(0, parseInt(playerCount, 10) || 0);
-        if (normalizedPlayerCount >= 6) {
+        if (normalizedPlayerCount >= 7) {
             return res.json({ ok: true, inserted: 0, ignored: 0, skipped: 'player_count' });
         }
 

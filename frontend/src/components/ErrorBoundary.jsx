@@ -11,20 +11,19 @@ export default class ErrorBoundary extends Component {
     }
 
     componentDidCatch(error, errorInfo) {
-        // Keep this for diagnostics in the browser console.
         console.error('Frontend error boundary caught:', error, errorInfo);
     }
 
     render() {
         if (this.state.hasError) {
             return (
-                <div className="flex min-h-screen items-center justify-center bg-[#0b1220] p-6 text-white">
-                    <div className="w-full max-w-xl rounded-2xl border border-white/15 bg-white/5 p-6">
-                        <h1 className="text-2xl font-bold">Frontend crashed</h1>
-                        <p className="mt-2 text-sm text-slate-300">
+                <div className="flex min-h-screen items-center justify-center bg-transparent p-6">
+                    <div className="panel w-full max-w-xl p-6">
+                        <h1 className="text-2xl font-semibold text-zinc-950">Frontend crashed</h1>
+                        <p className="mt-2 text-sm text-zinc-500">
                             Something failed while rendering. Refresh the page. If it keeps happening, share this message.
                         </p>
-                        <pre className="mt-4 overflow-x-auto rounded-lg bg-black/30 p-3 text-xs text-rose-200">
+                        <pre className="mt-4 overflow-x-auto rounded-2xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                             {this.state.message}
                         </pre>
                     </div>

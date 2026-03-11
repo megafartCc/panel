@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../lib/api';
-import { Check, Copy, KeyRound, LoaderCircle, Plus, ShieldCheck, Sparkles, Trash2, Wrench } from 'lucide-react';
+import { Check, Copy, KeyRound, LoaderCircle, Plus, Shield, Trash2, Wrench } from 'lucide-react';
 
 function CopyButton({ text }) {
     const [copied, setCopied] = useState(false);
@@ -12,11 +12,8 @@ function CopyButton({ text }) {
     };
 
     return (
-        <button
-            onClick={handleCopy}
-            className="inline-flex items-center gap-2 rounded-xl border border-panel-border bg-white/[0.04] px-3 py-2 text-xs text-panel-text-dim transition hover:bg-white/[0.08] hover:text-white"
-        >
-            {copied ? <Check className="h-3.5 w-3.5 text-panel-success" /> : <Copy className="h-3.5 w-3.5" />}
+        <button type="button" onClick={handleCopy} className="btn-ghost">
+            {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
             {copied ? 'Copied' : 'Copy'}
         </button>
     );
@@ -33,53 +30,40 @@ pcall(function()
 end)`;
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 p-4 backdrop-blur-md"
-            onClick={onClose}
-        >
-            <div
-                className="panel-card-strong panel-ring w-full max-w-3xl rounded-[30px] p-5 sm:p-6"
-                onClick={(event) => event.stopPropagation()}
-            >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm" onClick={onClose}>
+            <div className="panel w-full max-w-4xl p-6 sm:p-7" onClick={(event) => event.stopPropagation()}>
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                        <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Integration</p>
-                        <h3 className="mt-2 text-2xl font-semibold">{script.name}</h3>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-panel-text-dim">
-                            Embed this snippet into the script entrypoint. The heartbeat payload uses the script slug and HMAC key below.
+                        <p className="section-kicker">Integration</p>
+                        <h3 className="section-title mt-2 text-3xl font-semibold text-zinc-950">{script.name}</h3>
+                        <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-500">
+                            Embed this snippet into the script entrypoint. The heartbeat payload still uses the script slug and HMAC key below.
                         </p>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-2 text-sm text-panel-text-dim transition hover:bg-white/[0.08] hover:text-white"
-                    >
-                        Close
-                    </button>
+                    <button type="button" onClick={onClose} className="btn-ghost">Close</button>
                 </div>
 
-                <div className="mt-6 grid gap-4 lg:grid-cols-[0.88fr_1.12fr]">
-                    <div className="space-y-4 rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                <div className="mt-6 grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
+                    <div className="card surface-soft space-y-4 p-4">
                         <div>
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Slug</p>
-                            <p className="panel-mono mt-2 text-sm text-white">{script.slug}</p>
+                            <p className="field-label">Slug</p>
+                            <p className="break-all text-sm font-medium text-zinc-950">{script.slug}</p>
                         </div>
                         <div>
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">HMAC key</p>
-                            <p className="panel-mono mt-2 break-all text-sm text-white">{script.hmac_key}</p>
+                            <p className="field-label">HMAC key</p>
+                            <p className="break-all text-sm font-medium text-zinc-950">{script.hmac_key}</p>
                         </div>
-                        <div className="rounded-2xl border border-panel-border bg-[linear-gradient(135deg,_rgba(255,107,87,0.12),_rgba(103,184,255,0.08))] p-4 text-sm text-panel-text-dim">
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
                             Keep this key private. Anyone holding it can impersonate heartbeat traffic for this script slug.
                         </div>
                     </div>
 
-                    <div className="rounded-[24px] border border-panel-border bg-[#050b15] p-4">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Snippet</p>
+                    <div className="card overflow-hidden border-zinc-900 bg-zinc-950 text-zinc-100">
+                        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                            <p className="section-kicker text-zinc-400">Snippet</p>
                             <CopyButton text={snippet} />
                         </div>
-                        <pre className="panel-mono overflow-x-auto whitespace-pre rounded-[18px] border border-panel-border bg-black/20 p-4 text-sm leading-7 text-[#dbe7ff]">
-                            {snippet}
-                        </pre>
+                        <pre className="overflow-x-auto p-4 text-sm leading-7 text-zinc-100">{snippet}</pre>
                     </div>
                 </div>
             </div>
@@ -98,10 +82,7 @@ export default function Scripts() {
     const [snippetScript, setSnippetScript] = useState(null);
     const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-    const totalLive = useMemo(
-        () => scripts.reduce((sum, script) => sum + (script.active_users || 0), 0),
-        [scripts],
-    );
+    const totalLive = useMemo(() => scripts.reduce((sum, script) => sum + (script.active_users || 0), 0), [scripts]);
 
     const loadScripts = async () => {
         try {
@@ -160,164 +141,151 @@ export default function Scripts() {
 
     if (loading) {
         return (
-            <div className="panel-card panel-ring flex h-72 items-center justify-center rounded-[28px]">
-                <LoaderCircle className="h-7 w-7 animate-spin text-panel-accent" />
+            <div className="panel flex h-72 items-center justify-center">
+                <LoaderCircle className="h-7 w-7 animate-spin text-zinc-900" />
             </div>
         );
     }
 
     return (
-        <div className="space-y-5">
-            <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-                <div className="panel-card panel-ring rounded-[28px] px-5 py-6 sm:px-6">
-                    <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Registry</p>
-                    <h1 className="panel-title mt-3 text-3xl font-bold">Manage script identities, shipping keys, and embed snippets.</h1>
-                    <p className="mt-3 max-w-3xl text-sm leading-7 text-panel-text-dim">
-                        Each script gets its own slug and HMAC key. This page should feel like a deployment registry, not a debug panel.
+        <div className="space-y-6">
+            <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+                <article className="panel p-6">
+                    <p className="section-kicker">Registry</p>
+                    <h2 className="section-title mt-2 text-4xl font-semibold text-zinc-950">Manage script identities and shipping keys.</h2>
+                    <p className="mt-3 max-w-3xl text-sm leading-7 text-zinc-500">
+                        Each script gets its own slug and HMAC key. The panel exposes a clean integration modal instead of burying it in raw admin controls.
                     </p>
 
                     <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                        <div className="rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Scripts</p>
-                            <p className="mt-3 text-3xl font-semibold">{scripts.length}</p>
+                        <div className="card surface-soft p-4">
+                            <p className="section-kicker">Scripts</p>
+                            <p className="mt-3 text-3xl font-semibold text-zinc-950">{scripts.length}</p>
                         </div>
-                        <div className="rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Live users</p>
-                            <p className="mt-3 text-3xl font-semibold">{totalLive}</p>
+                        <div className="card surface-soft p-4">
+                            <p className="section-kicker">Live users</p>
+                            <p className="mt-3 text-3xl font-semibold text-zinc-950">{totalLive}</p>
                         </div>
-                        <div className="rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Managed auth</p>
-                            <p className="mt-3 text-3xl font-semibold">HMAC</p>
+                        <div className="card surface-soft p-4">
+                            <p className="section-kicker">Auth</p>
+                            <p className="mt-3 text-3xl font-semibold text-zinc-950">HMAC</p>
                         </div>
                     </div>
-                </div>
+                </article>
 
-                <div className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
-                    <div className="flex items-start justify-between gap-4">
-                        <div>
-                            <p className="panel-mono text-[11px] uppercase tracking-[0.3em] text-panel-text-muted">Action</p>
-                            <h2 className="mt-2 text-xl font-semibold">Register a new script target</h2>
-                            <p className="mt-2 text-sm leading-6 text-panel-text-dim">
-                                New scripts get a unique HMAC key immediately. The integration modal exposes the embed snippet.
-                            </p>
-                        </div>
-                        <button
-                            onClick={() => setShowAdd((value) => !value)}
-                            className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.94),_rgba(245,158,11,0.88))] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(255,107,87,0.24)] transition hover:translate-y-[-1px]"
-                        >
-                            <Plus className="h-4 w-4" />
-                            {showAdd ? 'Hide form' : 'Add script'}
-                        </button>
-                    </div>
-                </div>
+                <article className="panel p-6">
+                    <p className="section-kicker">Action</p>
+                    <h3 className="section-title mt-2 text-3xl font-semibold text-zinc-950">Register a new script</h3>
+                    <p className="mt-3 text-sm leading-7 text-zinc-500">
+                        New scripts receive a unique HMAC key immediately. Open the integration modal after creation to copy the embed snippet.
+                    </p>
+                    <button type="button" onClick={() => setShowAdd((value) => !value)} className="btn btn-dark mt-6 w-full sm:w-auto">
+                        <Plus className="h-4 w-4" />
+                        {showAdd ? 'Hide form' : 'Add script'}
+                    </button>
+                </article>
             </section>
 
             {showAdd && (
-                <section className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                <section className="panel p-6">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.16),_rgba(103,184,255,0.14))]">
-                            <Wrench className="h-5 w-5 text-panel-accent" />
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
+                            <Wrench className="h-5 w-5" />
                         </div>
                         <div>
-                            <h3 className="text-xl font-semibold">Register new script</h3>
-                            <p className="text-sm text-panel-text-dim">Keep slug short, stable, and lowercase.</p>
+                            <h3 className="text-2xl font-semibold text-zinc-950">Register new script</h3>
+                            <p className="text-sm text-zinc-500">Keep slug short, stable, and lowercase.</p>
                         </div>
                     </div>
 
                     {addError && (
-                        <div className="mt-5 rounded-2xl border border-panel-danger/25 bg-panel-danger/10 px-4 py-3 text-sm text-panel-danger">
+                        <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                             {addError}
                         </div>
                     )}
 
                     <form onSubmit={handleAdd} className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.8fr_auto]">
-                        <input
-                            type="text"
-                            placeholder="Display name"
-                            value={newName}
-                            onChange={(event) => setNewName(event.target.value)}
-                            className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-white/20"
-                            required
-                        />
-                        <input
-                            type="text"
-                            placeholder="script_slug"
-                            value={newSlug}
-                            onChange={(event) => setNewSlug(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                            className="panel-mono rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-white/20"
-                            required
-                        />
-                        <button
-                            type="submit"
-                            disabled={addLoading}
-                            className="rounded-2xl bg-[linear-gradient(135deg,_rgba(87,217,130,0.9),_rgba(110,231,216,0.84))] px-5 py-3 text-sm font-semibold text-slate-950 transition hover:opacity-95 disabled:opacity-60"
-                        >
-                            {addLoading ? 'Creating...' : 'Create'}
-                        </button>
+                        <div>
+                            <label className="field-label" htmlFor="script-name">Display name</label>
+                            <input
+                                id="script-name"
+                                type="text"
+                                placeholder="Display name"
+                                value={newName}
+                                onChange={(event) => setNewName(event.target.value)}
+                                className="input"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="field-label" htmlFor="script-slug">Script slug</label>
+                            <input
+                                id="script-slug"
+                                type="text"
+                                placeholder="script_slug"
+                                value={newSlug}
+                                onChange={(event) => setNewSlug(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                                className="input"
+                                required
+                            />
+                        </div>
+                        <div className="flex items-end">
+                            <button type="submit" disabled={addLoading} className="btn w-full lg:w-auto">
+                                {addLoading ? 'Creating...' : 'Create'}
+                            </button>
+                        </div>
                     </form>
                 </section>
             )}
 
             <section className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 {scripts.map((script) => (
-                    <article key={script.id} className="panel-card panel-ring rounded-[28px] p-5 sm:p-6">
+                    <article key={script.id} className="panel p-5">
                         <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0">
-                                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.16),_rgba(103,184,255,0.14))]">
-                                    <ShieldCheck className="h-5 w-5 text-panel-accent" />
+                                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
+                                    <Shield className="h-5 w-5" />
                                 </div>
-                                <h3 className="truncate text-xl font-semibold">{script.name}</h3>
-                                <p className="panel-mono mt-2 text-xs uppercase tracking-[0.24em] text-panel-text-muted">{script.slug}</p>
+                                <h3 className="mt-4 truncate text-2xl font-semibold text-zinc-950">{script.name}</h3>
+                                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-zinc-400">{script.slug}</p>
                             </div>
-                            <div className="rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-right">
-                                <p className="panel-mono text-[10px] uppercase tracking-[0.26em] text-panel-text-muted">Live</p>
-                                <p className="mt-2 text-2xl font-semibold">{script.active_users || 0}</p>
+                            <div className="card surface-soft px-4 py-3 text-right">
+                                <p className="section-kicker">Live</p>
+                                <p className="mt-2 text-2xl font-semibold text-zinc-950">{script.active_users || 0}</p>
                             </div>
                         </div>
 
-                        <div className="mt-5 rounded-[24px] border border-panel-border bg-white/[0.04] p-4">
+                        <div className="card surface-soft mt-5 p-4">
                             <div className="flex items-center justify-between gap-3">
                                 <div>
-                                    <p className="panel-mono text-[11px] uppercase tracking-[0.26em] text-panel-text-muted">Auth material</p>
-                                    <p className="mt-2 text-sm text-panel-text-dim">Use the integration modal to copy the embed snippet and HMAC key.</p>
+                                    <p className="section-kicker">Auth Material</p>
+                                    <p className="mt-2 text-sm text-zinc-500">Open integration to copy the embed snippet and current HMAC key.</p>
                                 </div>
-                                <Sparkles className="h-4 w-4 text-panel-secondary" />
+                                <KeyRound className="h-4 w-4 text-zinc-400" />
                             </div>
                         </div>
 
-                        <div className="mt-5 flex flex-wrap items-center gap-3">
-                            <button
-                                onClick={() => handleViewKey(script.id)}
-                                className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,_rgba(255,107,87,0.92),_rgba(245,158,11,0.84))] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(255,107,87,0.2)]"
-                            >
+                        <div className="mt-5 flex flex-wrap gap-3">
+                            <button type="button" onClick={() => handleViewKey(script.id)} className="btn btn-dark">
                                 <KeyRound className="h-4 w-4" />
                                 Integration
                             </button>
-                            <button
-                                onClick={() => setDeleteConfirm(deleteConfirm === script.id ? null : script.id)}
-                                className="inline-flex items-center gap-2 rounded-2xl border border-panel-border bg-white/[0.04] px-4 py-3 text-sm text-panel-text-dim transition hover:bg-panel-danger/10 hover:text-panel-danger"
-                            >
+                            <button type="button" onClick={() => setDeleteConfirm(deleteConfirm === script.id ? null : script.id)} className="btn-ghost">
                                 <Trash2 className="h-4 w-4" />
                                 Delete
                             </button>
                         </div>
 
                         {deleteConfirm === script.id && (
-                            <div className="mt-4 rounded-[22px] border border-panel-danger/25 bg-panel-danger/10 p-4">
-                                <p className="text-sm text-panel-danger">
+                            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
+                                <p className="text-sm text-red-700">
                                     Delete <span className="font-semibold">{script.name}</span>? This removes session history for the script.
                                 </p>
-                                <div className="mt-4 flex gap-3">
-                                    <button
-                                        onClick={() => handleDelete(script.id)}
-                                        className="rounded-xl bg-panel-danger px-4 py-2 text-sm font-semibold text-white"
-                                    >
+                                <div className="mt-4 flex flex-wrap gap-3">
+                                    <button type="button" onClick={() => handleDelete(script.id)} className="btn-danger">
                                         Confirm delete
                                     </button>
-                                    <button
-                                        onClick={() => setDeleteConfirm(null)}
-                                        className="rounded-xl border border-panel-border bg-white/[0.04] px-4 py-2 text-sm text-panel-text-dim"
-                                    >
+                                    <button type="button" onClick={() => setDeleteConfirm(null)} className="btn-ghost">
                                         Cancel
                                     </button>
                                 </div>
@@ -327,17 +295,15 @@ export default function Scripts() {
                 ))}
 
                 {scripts.length === 0 && (
-                    <div className="panel-card panel-ring col-span-full rounded-[28px] px-5 py-14 text-center">
-                        <ShieldCheck className="mx-auto h-10 w-10 text-panel-text-muted" />
-                        <p className="mt-4 text-lg font-semibold">No scripts registered yet</p>
-                        <p className="mt-2 text-sm text-panel-text-muted">Create one and the panel will generate its HMAC key automatically.</p>
+                    <div className="panel col-span-full px-5 py-14 text-center">
+                        <Shield className="mx-auto h-10 w-10 text-zinc-400" />
+                        <p className="mt-4 text-lg font-semibold text-zinc-950">No scripts registered yet</p>
+                        <p className="mt-2 text-sm text-zinc-500">Create one and the panel will generate its HMAC key automatically.</p>
                     </div>
                 )}
             </section>
 
-            {snippetScript && (
-                <IntegrationModal script={snippetScript} onClose={() => setSnippetScript(null)} />
-            )}
+            {snippetScript && <IntegrationModal script={snippetScript} onClose={() => setSnippetScript(null)} />}
         </div>
     );
 }

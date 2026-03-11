@@ -14,7 +14,7 @@ export function usePolling(interval = 3000) {
             const [sessData, statsData, finderData] = await Promise.all([
                 apiFetch('/sessions'),
                 apiFetch('/sessions/stats'),
-                apiFetch('/finder?script=sabnew'),
+                apiFetch('/finder/public?script=sabnew'),
             ]);
 
             setSessions(sessData.sessions || []);

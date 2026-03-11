@@ -306,6 +306,28 @@ router.get('/feed', (req, res) => {
     }
 });
 
+router.get('/public', (req, res) => {
+    try {
+        const { script, exclude_jobid: excludeJobId, limit } = req.query;
+        const servers = buildFinderServers(listFinderRows({
+            script,
+            excludeJobId,
+            limit,
+        }));
+
+        res.json({
+            ok: true,
+            ttlSeconds: FINDER_TTL_SECONDS,
+            generatedAt: new Date().toISOString(),
+            total: servers.length,
+            servers,
+        });
+    } catch (err) {
+        console.error('[Finder] PUBLIC error:', err.message);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
 router.get('/', authMiddleware, (req, res) => {
     try {
         const { script, exclude_jobid: excludeJobId, limit } = req.query;

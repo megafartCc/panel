@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --color-panel-bg: #0a0a0f;
+  --color-panel-card: #12121a;
+  --color-panel-card-hover: #1a1a25;
+  --color-panel-border: #1e1e2e;
+  --color-panel-accent: #8b5cf6;
+  --color-panel-accent-dim: #7c3aed;
+  --color-panel-accent-glow: rgba(139, 92, 246, 0.15);
+  --color-panel-success: #22c55e;
+  --color-panel-warning: #f59e0b;
+  --color-panel-danger: #ef4444;
+  --color-panel-info: #3b82f6;
+  --color-panel-text: #e2e8f0;
+  --color-panel-text-dim: #94a3b8;
+  --color-panel-text-muted: #64748b;
+}
+
+body {
+  margin: 0;
+  background: var(--color-panel-bg);
+  color: var(--color-panel-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-panel-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-panel-text-muted);
+}
+
+/* Glow animation */
+@keyframes pulse-glow {
+
+  0%,
+  100% {
+    box-shadow: 0 0 20px var(--color-panel-accent-glow);
+  }
+
+  50% {
+    box-shadow: 0 0 40px var(--color-panel-accent-glow), 0 0 60px rgba(139, 92, 246, 0.08);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+/* Live dot */
+@keyframes live-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.5;
+    transform: scale(1.5);
+  }
+}
+
+.animate-live-pulse {
+  animation: live-pulse 2s ease-in-out infinite;
+}

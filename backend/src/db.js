@@ -17,6 +17,32 @@ function getDb() {
     return db;
 }
 
+function syncSeededScript(conn, script) {
+    const existing = conn.prepare('SELECT id, hmac_key FROM scripts WHERE slug = ?').get(script.slug);
+    const resolvedKey = script.envKey || crypto.randomBytes(32).toString('hex');
+
+    if (!existing) {
+        conn.prepare('INSERT INTO scripts (id, name, slug, hmac_key) VALUES (?, ?, ?, ?)').run(
+            uuidv4(), script.name, script.slug, resolvedKey
+        );
+        console.log(`[DB] Created default script: ${script.name} (slug: ${script.slug})`);
+        if (script.envKey) {
+            console.log(`[DB] Using ${script.envName} from environment`);
+        }
+        return;
+    }
+
+    if (script.envKey && existing.hmac_key !== script.envKey) {
+        conn.prepare('UPDATE scripts SET name = ?, hmac_key = ? WHERE slug = ?').run(
+            script.name, script.envKey, script.slug
+        );
+        console.log(`[DB] Synced ${script.slug} hmac_key from environment`);
+        return;
+    }
+
+    conn.prepare('UPDATE scripts SET name = ? WHERE slug = ?').run(script.name, script.slug);
+}
+
 function migrate() {
     const conn = getDb();
 
@@ -76,21 +102,30 @@ function migrate() {
         console.log(`[DB] Created default admin user: ${adminUser}`);
     }
 
-    // Seed or sync the default SAB script entry from env when provided.
-    const sabnewEnvKey = process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY;
-    const existingScript = conn.prepare('SELECT id, hmac_key FROM scripts WHERE slug = ?').get('sabnew');
-    if (!existingScript) {
-        const hmacKey = sabnewEnvKey || crypto.randomBytes(32).toString('hex');
-        conn.prepare('INSERT INTO scripts (id, name, slug, hmac_key) VALUES (?, ?, ?, ?)').run(
-            uuidv4(), 'SAB New', 'sabnew', hmacKey
-        );
-        console.log(`[DB] Created default script: SAB New (slug: sabnew)`);
-        if (sabnewEnvKey) {
-            console.log('[DB] Using SABNEW_HMAC_KEY from environment');
-        }
-    } else if (sabnewEnvKey && existingScript.hmac_key !== sabnewEnvKey) {
-        conn.prepare('UPDATE scripts SET hmac_key = ? WHERE slug = ?').run(sabnewEnvKey, 'sabnew');
-        console.log('[DB] Synced sabnew hmac_key from environment');
+    const sharedEnvKey = process.env.PANEL_SHARED_HMAC_KEY || process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY;
+    const seededScripts = [
+        {
+            name: 'SAB New',
+            slug: 'sabnew',
+            envName: 'SABNEW_HMAC_KEY',
+            envKey: process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY || sharedEnvKey,
+        },
+        {
+            name: 'Fisch',
+            slug: 'fisch',
+            envName: 'FISCH_HMAC_KEY',
+            envKey: process.env.FISCH_HMAC_KEY || process.env.PANEL_FISCH_HMAC_KEY || sharedEnvKey,
+        },
+        {
+            name: 'BeeSwarm',
+            slug: 'beeswarm',
+            envName: 'BEESWARM_HMAC_KEY',
+            envKey: process.env.BEESWARM_HMAC_KEY || process.env.PANEL_BEESWARM_HMAC_KEY || sharedEnvKey,
+        },
+    ];
+
+    for (const script of seededScripts) {
+        syncSeededScript(conn, script);
     }
 
     console.log('[DB] Migrations complete');

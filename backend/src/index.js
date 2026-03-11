@@ -21,7 +21,10 @@ const PORT = process.env.PORT || 3001;
 
 // --- Middleware ---
 app.set('trust proxy', 1); // Railway runs behind a reverse proxy
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: false, // React app handles its own CSP
+    crossOriginEmbedderPolicy: false
+}));
 app.use(cors({
     origin: process.env.FRONTEND_URL || true,
     credentials: true

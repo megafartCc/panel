@@ -11,7 +11,7 @@ import {
     PointElement,
     Tooltip,
 } from 'chart.js';
-import { Doughnut, Line } from 'react-chartjs-2';
+import { Line, Pie } from 'react-chartjs-2';
 
 ChartJS.register(ArcElement, CategoryScale, LinearScale, PointElement, LineElement, Legend, Tooltip);
 
@@ -72,7 +72,7 @@ export default function Dashboard() {
         };
     }, [recent]);
 
-    const scriptTypeConfig = useMemo(() => {
+    const scriptsConnectedPieConfig = useMemo(() => {
         const perScript = stats?.perScript || [];
         return {
             data: {
@@ -132,13 +132,13 @@ export default function Dashboard() {
                 <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_15px_35px_rgba(15,23,42,0.06)]">
                     <div className="mb-4 flex items-center justify-between">
                         <div>
-                            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Script type</p>
-                            <h3 className="text-xl font-semibold">Live distribution</h3>
+                            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Scripts connected</p>
+                            <h3 className="text-xl font-semibold">Players by script</h3>
                         </div>
                         <Code2 className="h-5 w-5 text-slate-400" />
                     </div>
                     <div className="h-[320px]">
-                        <Doughnut data={scriptTypeConfig.data} options={scriptTypeConfig.options} />
+                        <Pie data={scriptsConnectedPieConfig.data} options={scriptsConnectedPieConfig.options} />
                     </div>
                 </article>
             </section>

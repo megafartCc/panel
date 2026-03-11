@@ -23,7 +23,6 @@ export default function Layout() {
                 <aside className="hidden w-[280px] shrink-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_20px_45px_rgba(15,23,42,0.08)] lg:flex lg:flex-col">
                     <div className="border-l-4 border-sky-500 pl-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">FunPay Automation v2</p>
-                        <h1 className="mt-2 text-2xl font-bold">Control Panel</h1>
                         <p className="mt-2 text-sm text-slate-500">Connections, scripts, and player traffic in one place.</p>
                     </div>
 
@@ -34,7 +33,7 @@ export default function Layout() {
                                 to={item.to}
                                 end={item.to === '/'}
                                 className={({ isActive }) =>
-                                    `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                                    `flex items-center gap-3 rounded-md px-4 py-3 text-sm font-medium transition ${
                                         isActive ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
                                     }`
                                 }

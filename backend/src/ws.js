@@ -1,4 +1,5 @@
 const { getDb } = require('./db');
+const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
 
 // ============================================
 // Simple approach: Lua scripts POST heartbeat
@@ -14,20 +15,20 @@ function startCleanupTimer() {
             const db = getDb();
             const stale = db.prepare(`
                 UPDATE sessions SET is_active = 0
-                WHERE is_active = 1 AND last_heartbeat < datetime('now', '-15 seconds')
-            `).run();
+                WHERE is_active = 1 AND last_heartbeat < datetime('now', ?)
+            `).run(`-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`);
             if (stale.changes > 0) {
                 console.log(`[Cleanup] Marked ${stale.changes} stale sessions inactive`);
             }
         } catch (err) {
             console.error('[Cleanup] Error:', err.message);
         }
-    }, 10000);
+    }, 5000);
 }
 
 function init() {
     startCleanupTimer();
-    console.log('[Server] Cleanup timer started (10s interval, 15s timeout)');
+    console.log(`[Server] Cleanup timer started (5s interval, ${ACTIVE_SESSION_TIMEOUT_SECONDS}s timeout)`);
 }
 
 module.exports = { init };

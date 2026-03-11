@@ -3,6 +3,8 @@ const { getDb } = require('../db');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
+const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
+const ACTIVE_WINDOW_SQL = `-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`;
 
 router.use(authMiddleware);
 
@@ -18,27 +20,27 @@ router.get('/', (req, res) => {
       SELECT sess.*, s.name as script_name, s.slug as script_slug
       FROM sessions sess
       JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1 AND s.slug = ?
+      WHERE sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?) AND s.slug = ?
       ORDER BY sess.last_heartbeat DESC
       LIMIT ? OFFSET ?
     `;
-        params = [script, parseInt(limit), parseInt(offset)];
+        params = [ACTIVE_WINDOW_SQL, script, parseInt(limit), parseInt(offset)];
     } else {
         query = `
       SELECT sess.*, s.name as script_name, s.slug as script_slug
       FROM sessions sess
       JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1
+      WHERE sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?)
       ORDER BY sess.last_heartbeat DESC
       LIMIT ? OFFSET ?
     `;
-        params = [parseInt(limit), parseInt(offset)];
+        params = [ACTIVE_WINDOW_SQL, parseInt(limit), parseInt(offset)];
     }
 
     const sessions = db.prepare(query).all(...params);
     const total = db.prepare(
-        'SELECT COUNT(*) as count FROM sessions WHERE is_active = 1'
-    ).get().count;
+        "SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND last_heartbeat >= datetime('now', ?)"
+    ).get(ACTIVE_WINDOW_SQL).count;
 
     res.json({ sessions, total });
 });
@@ -48,16 +50,16 @@ router.get('/stats', (req, res) => {
     const db = getDb();
 
     const totalActive = db.prepare(
-        'SELECT COUNT(*) as count FROM sessions WHERE is_active = 1'
-    ).get().count;
+        "SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND last_heartbeat >= datetime('now', ?)"
+    ).get(ACTIVE_WINDOW_SQL).count;
 
     const perScript = db.prepare(`
     SELECT s.name, s.slug, COUNT(sess.id) as active_users
     FROM scripts s
-    LEFT JOIN sessions sess ON sess.script_id = s.id AND sess.is_active = 1
+    LEFT JOIN sessions sess ON sess.script_id = s.id AND sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?)
     GROUP BY s.id
     ORDER BY active_users DESC
-  `).all();
+  `).all(ACTIVE_WINDOW_SQL);
 
     const totalSessions = db.prepare(
         'SELECT COUNT(*) as count FROM sessions'

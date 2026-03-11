@@ -5,6 +5,8 @@ const { getDb } = require('../db');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
+const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
+const ACTIVE_WINDOW_SQL = `-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`;
 
 // All routes require admin auth
 router.use(authMiddleware);
@@ -14,10 +16,10 @@ router.get('/', (req, res) => {
     const db = getDb();
     const scripts = db.prepare(`
     SELECT s.*, 
-      (SELECT COUNT(*) FROM sessions sess WHERE sess.script_id = s.id AND sess.is_active = 1) as active_users
+      (SELECT COUNT(*) FROM sessions sess WHERE sess.script_id = s.id AND sess.is_active = 1 AND sess.last_heartbeat >= datetime('now', ?)) as active_users
     FROM scripts s
     ORDER BY s.created_at DESC
-  `).all();
+  `).all(ACTIVE_WINDOW_SQL);
 
     res.json(scripts);
 });

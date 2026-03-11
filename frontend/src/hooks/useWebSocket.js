@@ -9,35 +9,24 @@ export function usePolling(interval = 3000) {
 
     const fetchData = useCallback(async () => {
         try {
-            const [sessRes, statsRes] = await Promise.all([
-                apiFetch('/api/sessions'),
-                apiFetch('/api/sessions/stats')
+            // apiFetch already prepends /api and returns parsed JSON
+            const [sessData, statsData] = await Promise.all([
+                apiFetch('/sessions'),
+                apiFetch('/sessions/stats')
             ]);
 
-            if (sessRes.ok && statsRes.ok) {
-                const sessData = await sessRes.json();
-                const statsData = await statsRes.json();
-                setSessions(sessData.sessions || []);
-                setStats(statsData);
-                setConnected(true);
-            } else {
-                setConnected(false);
-            }
+            setSessions(sessData.sessions || []);
+            setStats(statsData);
+            setConnected(true);
         } catch {
             setConnected(false);
         }
     }, []);
 
     useEffect(() => {
-        // Fetch immediately
         fetchData();
-
-        // Then poll every `interval` ms
         timerRef.current = setInterval(fetchData, interval);
-
-        return () => {
-            if (timerRef.current) clearInterval(timerRef.current);
-        };
+        return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [fetchData, interval]);
 
     return { sessions, stats, connected };

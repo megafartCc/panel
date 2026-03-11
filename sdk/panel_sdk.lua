@@ -21,7 +21,9 @@ local function computeHmac(key, message)
         if ok and r then return r end
     end
     if crypt and crypt.hmac then
-        local ok, r = pcall(crypt.hmac, message, key, "sha256")
+        local ok, r = pcall(crypt.hmac, key, message, "sha256")
+        if ok and r then return r end
+        ok, r = pcall(crypt.hmac, message, key, "sha256")
         if ok and r then return r end
     end
     if syn and syn.crypt and syn.crypt.custom and syn.crypt.custom.hash then

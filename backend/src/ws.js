@@ -1,7 +1,6 @@
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const url = require('url');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('./db');
 
@@ -12,53 +11,82 @@ const dashboardClients = new Set();
 const scriptClients = new Map();
 
 function initWebSocket(server) {
-    // --- Dashboard WebSocket (JWT-authed, for the React frontend) ---
-    const dashWss = new WebSocketServer({ server, path: '/ws' });
+    // Use noServer mode to manually handle upgrades — avoids conflicts with
+    // multiple WebSocketServers on the same HTTP server
+    const dashWss = new WebSocketServer({ noServer: true });
+    const scriptWss = new WebSocketServer({ noServer: true });
 
-    dashWss.on('connection', (ws, req) => {
-        const params = url.parse(req.url, true).query;
-        const token = params.token;
+    // Route upgrade requests to the correct WebSocket server
+    server.on('upgrade', (request, socket, head) => {
+        const pathname = new URL(request.url, 'http://localhost').pathname;
 
-        if (!token) { ws.close(4001, 'Missing token'); return; }
-        try { jwt.verify(token, process.env.JWT_SECRET); }
-        catch { ws.close(4001, 'Invalid token'); return; }
-
-        dashboardClients.add(ws);
-        console.log(`[WS:Dash] Connected (${dashboardClients.size} total)`);
-
-        ws.on('close', () => {
-            dashboardClients.delete(ws);
-            console.log(`[WS:Dash] Disconnected (${dashboardClients.size} total)`);
-        });
-        ws.on('error', () => dashboardClients.delete(ws));
-
-        // Send current active sessions
-        const db = getDb();
-        const activeSessions = db.prepare(`
-      SELECT sess.*, s.name as script_name, s.slug as script_slug
-      FROM sessions sess
-      JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1
-      ORDER BY sess.last_heartbeat DESC
-      LIMIT 200
-    `).all();
-
-        ws.send(JSON.stringify({ type: 'init', data: { sessions: activeSessions } }));
+        if (pathname === '/ws') {
+            dashWss.handleUpgrade(request, socket, head, (ws) => {
+                dashWss.emit('connection', ws, request);
+            });
+        } else if (pathname === '/ws/script') {
+            scriptWss.handleUpgrade(request, socket, head, (ws) => {
+                scriptWss.emit('connection', ws, request);
+            });
+        } else {
+            socket.destroy();
+        }
     });
 
-    // --- Script WebSocket (HMAC-authed, for Lua executor clients) ---
-    const scriptWss = new WebSocketServer({ server, path: '/ws/script' });
+    // --- Dashboard WebSocket ---
+    dashWss.on('connection', (ws, req) => {
+        try {
+            const urlObj = new URL(req.url, 'http://localhost');
+            const token = urlObj.searchParams.get('token');
 
+            if (!token) { ws.close(4001, 'Missing token'); return; }
+            try { jwt.verify(token, process.env.JWT_SECRET); }
+            catch { ws.close(4001, 'Invalid token'); return; }
+
+            dashboardClients.add(ws);
+            console.log(`[WS:Dash] Connected (${dashboardClients.size} total)`);
+
+            ws.on('close', () => {
+                dashboardClients.delete(ws);
+                console.log(`[WS:Dash] Disconnected (${dashboardClients.size} total)`);
+            });
+            ws.on('error', (err) => {
+                console.error('[WS:Dash] Error:', err.message);
+                dashboardClients.delete(ws);
+            });
+
+            // Send current active sessions
+            try {
+                const db = getDb();
+                const activeSessions = db.prepare(`
+          SELECT sess.id, sess.roblox_user, sess.roblox_userid, sess.executor,
+                 sess.server_jobid, sess.first_seen, sess.last_heartbeat, sess.is_active,
+                 s.name as script_name, s.slug as script_slug
+          FROM sessions sess
+          JOIN scripts s ON sess.script_id = s.id
+          WHERE sess.is_active = 1
+          ORDER BY sess.last_heartbeat DESC
+          LIMIT 200
+        `).all();
+
+                ws.send(JSON.stringify({ type: 'init', data: { sessions: activeSessions } }));
+            } catch (err) {
+                console.error('[WS:Dash] Failed to send init:', err.message);
+                ws.send(JSON.stringify({ type: 'init', data: { sessions: [] } }));
+            }
+        } catch (err) {
+            console.error('[WS:Dash] Connection handler error:', err.message);
+        }
+    });
+
+    // --- Script WebSocket (Lua clients) ---
     scriptWss.on('connection', (ws, req) => {
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
         let identified = false;
         let identifyTimeout;
 
-        // Must identify within 10 seconds or get kicked
         identifyTimeout = setTimeout(() => {
-            if (!identified) {
-                ws.close(4002, 'Identify timeout');
-            }
+            if (!identified) ws.close(4002, 'Identify timeout');
         }, 10000);
 
         ws.on('message', (raw) => {
@@ -66,12 +94,7 @@ function initWebSocket(server) {
             try { msg = JSON.parse(raw.toString()); } catch { return; }
 
             if (!identified) {
-                // First message MUST be identify
-                if (msg.type !== 'identify') {
-                    ws.close(4003, 'Expected identify');
-                    return;
-                }
-
+                if (msg.type !== 'identify') { ws.close(4003, 'Expected identify'); return; }
                 const result = handleIdentify(ws, msg, ip);
                 if (result) {
                     identified = true;
@@ -83,56 +106,43 @@ function initWebSocket(server) {
                 return;
             }
 
-            // After identified, handle keepalive pings and feature updates
             if (msg.type === 'ping') {
                 ws.send(JSON.stringify({ type: 'pong' }));
-                // Update last_heartbeat
                 const session = scriptClients.get(ws);
                 if (session) {
-                    const db = getDb();
-                    const now = new Date().toISOString();
-                    db.prepare('UPDATE sessions SET last_heartbeat = ? WHERE id = ?').run(now, session.sessionId);
-                    db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(session.sessionId, now);
+                    try {
+                        const db = getDb();
+                        const now = new Date().toISOString();
+                        db.prepare('UPDATE sessions SET last_heartbeat = ? WHERE id = ?').run(now, session.sessionId);
+                        db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(session.sessionId, now);
 
-                    broadcastDashboard({
-                        type: 'session:heartbeat',
-                        data: {
-                            sessionId: session.sessionId,
-                            script: session.scriptSlug,
-                            scriptName: session.scriptName,
-                            user: session.user,
-                            userid: session.userid,
-                            executor: session.executor,
-                            timestamp: now
-                        }
-                    });
-                }
-            }
-
-            if (msg.type === 'update') {
-                // Allow client to update metadata (e.g. feature toggles, game info)
-                const session = scriptClients.get(ws);
-                if (session && msg.data) {
-                    session.meta = { ...(session.meta || {}), ...msg.data };
+                        broadcastDashboard({
+                            type: 'session:heartbeat',
+                            data: {
+                                sessionId: session.sessionId,
+                                script: session.scriptSlug,
+                                scriptName: session.scriptName,
+                                user: session.user,
+                                userid: session.userid,
+                                executor: session.executor,
+                                timestamp: now
+                            }
+                        });
+                    } catch (err) {
+                        console.error('[WS:Script] Heartbeat error:', err.message);
+                    }
                 }
             }
         });
 
-        ws.on('close', () => {
-            clearTimeout(identifyTimeout);
-            handleScriptDisconnect(ws);
-        });
-
-        ws.on('error', () => {
-            clearTimeout(identifyTimeout);
-            handleScriptDisconnect(ws);
-        });
+        ws.on('close', () => { clearTimeout(identifyTimeout); handleScriptDisconnect(ws); });
+        ws.on('error', () => { clearTimeout(identifyTimeout); handleScriptDisconnect(ws); });
     });
 
-    // Stale session cleanup (for HTTP heartbeat fallback sessions) — every 30s
+    // Stale session cleanup every 30s
     setInterval(cleanupStaleSessions, 30000);
 
-    // Ping connected script clients every 25s to keep the connection alive
+    // Keepalive pings every 25s
     setInterval(() => {
         for (const [ws] of scriptClients) {
             if (ws.readyState === 1) {
@@ -147,30 +157,23 @@ function initWebSocket(server) {
 
 function handleIdentify(ws, msg, ip) {
     const { script, user, userid, executor, jobid, timestamp, signature } = msg;
-
     if (!script || !user || !userid || !timestamp || !signature) return null;
 
-    // Timestamp check (120s window — slightly wider for network lag)
     const now = Math.floor(Date.now() / 1000);
     const ts = parseInt(timestamp, 10);
     if (isNaN(ts) || Math.abs(now - ts) > 120) return null;
 
-    // Look up script HMAC key
     const db = getDb();
     const scriptRow = db.prepare('SELECT id, hmac_key, name, slug FROM scripts WHERE slug = ?').get(script);
     if (!scriptRow) return null;
 
-    // Verify HMAC
     const message = `${script}:${userid}:${timestamp}`;
     const expectedSig = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
 
     try {
         if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSig, 'hex'))) return null;
-    } catch {
-        return null;
-    }
+    } catch { return null; }
 
-    // Create or update session
     const existingSession = db.prepare(
         'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1'
     ).get(scriptRow.id, String(userid));
@@ -192,34 +195,21 @@ function handleIdentify(ws, msg, ip) {
 
     db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(sessionId, nowIso);
 
-    // Track this client
     const sessionData = {
-        sessionId,
-        scriptId: scriptRow.id,
-        scriptSlug: scriptRow.slug,
-        scriptName: scriptRow.name,
-        user,
-        userid: String(userid),
-        executor: executor || 'Unknown',
-        jobid: jobid || '',
-        meta: {}
+        sessionId, scriptId: scriptRow.id, scriptSlug: scriptRow.slug,
+        scriptName: scriptRow.name, user, userid: String(userid),
+        executor: executor || 'Unknown', jobid: jobid || '', meta: {}
     };
     scriptClients.set(ws, sessionData);
 
     console.log(`[WS:Script] ${user} identified on ${scriptRow.name} (${scriptClients.size} script clients)`);
 
-    // Broadcast join to dashboard
     broadcastDashboard({
         type: existingSession ? 'session:heartbeat' : 'session:join',
         data: {
-            sessionId,
-            script: scriptRow.slug,
-            scriptName: scriptRow.name,
-            user,
-            userid: String(userid),
-            executor: executor || 'Unknown',
-            jobid: jobid || '',
-            timestamp: nowIso
+            sessionId, script: scriptRow.slug, scriptName: scriptRow.name,
+            user, userid: String(userid), executor: executor || 'Unknown',
+            jobid: jobid || '', timestamp: nowIso
         }
     });
 
@@ -229,25 +219,23 @@ function handleIdentify(ws, msg, ip) {
 function handleScriptDisconnect(ws) {
     const session = scriptClients.get(ws);
     if (!session) return;
-
     scriptClients.delete(ws);
 
-    // Mark session inactive
-    const db = getDb();
-    db.prepare('UPDATE sessions SET is_active = 0, last_heartbeat = ? WHERE id = ?')
-        .run(new Date().toISOString(), session.sessionId);
+    try {
+        const db = getDb();
+        db.prepare('UPDATE sessions SET is_active = 0, last_heartbeat = ? WHERE id = ?')
+            .run(new Date().toISOString(), session.sessionId);
+    } catch (err) {
+        console.error('[WS:Script] Disconnect DB error:', err.message);
+    }
 
     console.log(`[WS:Script] ${session.user} disconnected from ${session.scriptName} (${scriptClients.size} remaining)`);
 
-    // Broadcast leave to dashboard
     broadcastDashboard({
         type: 'session:leave',
         data: {
-            sessionId: session.sessionId,
-            user: session.user,
-            userid: session.userid,
-            script: session.scriptSlug,
-            scriptName: session.scriptName,
+            sessionId: session.sessionId, user: session.user, userid: session.userid,
+            script: session.scriptSlug, scriptName: session.scriptName,
             timestamp: new Date().toISOString()
         }
     });
@@ -255,37 +243,25 @@ function handleScriptDisconnect(ws) {
 
 function cleanupStaleSessions() {
     const db = getDb();
-
-    // Only clean up sessions NOT held by an active WS client
     const activeWsSessionIds = new Set();
-    for (const [, s] of scriptClients) {
-        activeWsSessionIds.add(s.sessionId);
-    }
+    for (const [, s] of scriptClients) activeWsSessionIds.add(s.sessionId);
 
     const staleSessions = db.prepare(`
     SELECT sess.id, sess.roblox_user, sess.roblox_userid, s.slug as script_slug, s.name as script_name
-    FROM sessions sess
-    JOIN scripts s ON sess.script_id = s.id
+    FROM sessions sess JOIN scripts s ON sess.script_id = s.id
     WHERE sess.is_active = 1 AND sess.last_heartbeat < datetime('now', '-90 seconds')
   `).all();
 
     const toDeactivate = staleSessions.filter(s => !activeWsSessionIds.has(s.id));
-
     if (toDeactivate.length > 0) {
-        const staleIds = toDeactivate.map(s => s.id);
-        const placeholders = staleIds.map(() => '?').join(',');
-        db.prepare(`UPDATE sessions SET is_active = 0 WHERE id IN (${placeholders})`).run(...staleIds);
-
-        for (const session of toDeactivate) {
+        const ids = toDeactivate.map(s => s.id);
+        db.prepare(`UPDATE sessions SET is_active = 0 WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+        for (const s of toDeactivate) {
             broadcastDashboard({
                 type: 'session:leave',
                 data: {
-                    sessionId: session.id,
-                    user: session.roblox_user,
-                    userid: session.roblox_userid,
-                    script: session.script_slug,
-                    scriptName: session.script_name,
-                    timestamp: new Date().toISOString()
+                    sessionId: s.id, user: s.roblox_user, userid: s.roblox_userid,
+                    script: s.script_slug, scriptName: s.script_name, timestamp: new Date().toISOString()
                 }
             });
         }
@@ -301,9 +277,6 @@ function broadcastDashboard(message) {
     }
 }
 
-// Keep backward compat — heartbeat.js still calls broadcast()
-function broadcast(message) {
-    broadcastDashboard(message);
-}
+function broadcast(message) { broadcastDashboard(message); }
 
 module.exports = { initWebSocket, broadcast, broadcastDashboard };

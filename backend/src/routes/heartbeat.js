@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db');
+const { upsertConnectionMetric } = require('../mysqlMetrics');
 
 const router = express.Router();
 
@@ -57,7 +58,7 @@ router.post('/', (req, res) => {
 
         // Find existing active session for this user + script
         const existing = db.prepare(
-            'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1'
+            'SELECT id, first_seen FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1'
         ).get(scriptRow.id, String(userid));
 
         let sessionId;
@@ -76,6 +77,19 @@ router.post('/', (req, res) => {
 
         // Log heartbeat
         db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(sessionId, nowIso);
+
+        upsertConnectionMetric({
+            sessionId,
+            scriptSlug: scriptRow.slug,
+            robloxUser: user,
+            robloxUserId: String(userid),
+            executor: executor || 'Unknown',
+            serverJobId: jobid || '',
+            ipAddress: ip,
+            firstSeen: existing?.first_seen || nowIso,
+            lastHeartbeat: nowIso,
+            isActive: true,
+        });
 
         res.json({ ok: true, sessionId });
     } catch (err) {

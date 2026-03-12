@@ -9,6 +9,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { migrate } = require('./db');
 const { init } = require('./ws');
+const { initMySqlMetrics, mysqlEnabled } = require('./mysqlMetrics');
 
 const authRoutes = require('./routes/auth');
 const heartbeatRoutes = require('./routes/heartbeat');
@@ -92,10 +93,22 @@ app.use((err, req, res, next) => {
 });
 
 // --- Start ---
-migrate();
-init(); // starts the stale session cleanup timer
+async function start() {
+    migrate();
+    init(); // starts the stale session cleanup timer
 
-app.listen(PORT, () => {
-    console.log(`\n🚀 Panel running on http://localhost:${PORT}`);
-    console.log(`   Health: http://localhost:${PORT}/api/health\n`);
-});
+    if (mysqlEnabled()) {
+        try {
+            await initMySqlMetrics();
+        } catch (error) {
+            console.error('[MySQL] Init failed:', error.message);
+        }
+    }
+
+    app.listen(PORT, () => {
+        console.log(`\n🚀 Panel running on http://localhost:${PORT}`);
+        console.log(`   Health: http://localhost:${PORT}/api/health\n`);
+    });
+}
+
+start();

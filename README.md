@@ -17,9 +17,18 @@ Real-time dashboard to monitor users of your Lua scripts.
    - `ADMIN_USER` — your admin username
    - `ADMIN_PASS` — your admin password
    - `PORT` — Railway sets this automatically
+   - Optional MySQL metrics mirror:
+     - `MYSQL_HOST`
+     - `MYSQL_PORT` (default `3306`)
+     - `MYSQL_USER`
+     - `MYSQL_PASSWORD`
+     - `MYSQL_DATABASE`
+     - `MYSQL_SSL=true` (recommended on Railway)
 5. Set the build command: `cd frontend && npm install && npm run build`
 6. Set the start command: `cd backend && npm install && node src/index.js`
 7. Deploy!
+
+If MySQL variables are set, heartbeat/session connection data is mirrored into `panel_connections` table automatically.
 
 ## Local Development
 

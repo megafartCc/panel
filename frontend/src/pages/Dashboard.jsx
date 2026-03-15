@@ -37,9 +37,19 @@ function compact(value) {
     return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0);
 }
 
+function parseDateValue(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    const time = date.getTime();
+    if (!Number.isFinite(time)) return null;
+    return date;
+}
+
 function timeSince(dateStr) {
     if (!dateStr) return 'never';
-    const seconds = Math.max(0, Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000));
+    const date = parseDateValue(dateStr);
+    if (!date) return 'unknown';
+    const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
     if (seconds < 10) return 'just now';
     if (seconds < 60) return `${seconds}s ago`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
@@ -49,7 +59,8 @@ function timeSince(dateStr) {
 
 function formatHourLabel(hour) {
     if (!hour) return '--';
-    const date = new Date(hour);
+    const date = parseDateValue(hour);
+    if (!date) return '--';
     return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric' }).format(date);
 }
 
@@ -77,12 +88,13 @@ export default function Dashboard() {
 
     const filteredActivity = useMemo(() => {
         const hourlyActivity = stats?.hourlyActivity || [];
+        const validActivity = hourlyActivity.filter((entry) => parseDateValue(entry?.hour));
         const cutoff = Date.now() - (windowHours * 60 * 60 * 1000);
-        const narrowed = hourlyActivity.filter((entry) => {
-            const parsed = new Date(entry.hour).getTime();
-            return Number.isFinite(parsed) && parsed >= cutoff;
+        const narrowed = validActivity.filter((entry) => {
+            const parsed = parseDateValue(entry.hour);
+            return parsed && parsed.getTime() >= cutoff;
         });
-        return narrowed.length > 0 ? narrowed : hourlyActivity;
+        return narrowed.length > 0 ? narrowed : validActivity;
     }, [stats?.hourlyActivity, windowHours]);
 
     const peakHour = filteredActivity.reduce((best, current) => {

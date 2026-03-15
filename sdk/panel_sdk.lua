@@ -255,6 +255,19 @@ local function extractBody(response)
     return response.Body or response.body
 end
 
+local function debugWarn(enabled, ...)
+    if enabled then
+        warn(...)
+    end
+end
+
+local function summarizeError(response)
+    if type(response) ~= "table" then
+        return tostring(response)
+    end
+    return tostring(response.error or response.message or response.statusCode or "unknown error")
+end
+
 local function postJson(panelUrl, path, payload)
     local requestFn = getRequestFunction()
     if not requestFn then
@@ -337,13 +350,41 @@ local function sendSignedRequest(panelUrl, scriptSlug, hmacKey, path, extra)
     return postJson(panelUrl, path, payload)
 end
 
-local function sendPing(panelUrl, scriptSlug, hmacKey)
-    pcall(function()
-        sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat", {
+local function sendPing(panelUrl, scriptSlug, hmacKey, options)
+    local debugMode = type(options) == "table" and options.debug == true
+    local okCall, success, response = pcall(function()
+        return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat", {
             executor = getExecutorName(),
             jobid = game.JobId or "",
         })
     end)
+
+    if not okCall then
+        debugWarn(debugMode, "[PanelSDK] heartbeat exception:", tostring(success))
+        return false, { error = tostring(success) }
+    end
+
+    if success then
+        debugWarn(
+            debugMode,
+            string.format(
+                "[PanelSDK] heartbeat ok script=%s user=%s",
+                tostring(scriptSlug),
+                tostring(lp and lp.Name or "unknown")
+            )
+        )
+    else
+        debugWarn(
+            debugMode,
+            string.format(
+                "[PanelSDK] heartbeat failed script=%s reason=%s",
+                tostring(scriptSlug),
+                summarizeError(response)
+            )
+        )
+    end
+
+    return success, response
 end
 
 function PanelSDK.cloudSave(panelUrl, scriptSlug, hmacKey, presetName, data)
@@ -422,11 +463,20 @@ function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
     local initialDelay = tonumber(options.initialDelay or options.delay or 2) or 2
     local interval = tonumber(options.interval or options.intervalSeconds or 10) or 10
     interval = math.max(3, interval)
+    local debugMode = options.debug == true
 
     task.spawn(function()
+        debugWarn(
+            debugMode,
+            string.format(
+                "[PanelSDK] monitor started script=%s interval=%ss",
+                tostring(scriptSlug),
+                tostring(interval)
+            )
+        )
         task.wait(math.max(0, initialDelay))
         while true do
-            sendPing(panelUrl, scriptSlug, hmacKey)
+            sendPing(panelUrl, scriptSlug, hmacKey, options)
             task.wait(interval)
         end
     end)

@@ -21,12 +21,13 @@ function CopyButton({ text }) {
 
 function IntegrationModal({ script, onClose }) {
     const snippet = `local PANEL_URL = "https://YOUR_DOMAIN.com"
-local PANEL_SCRIPT = "${script.slug}"
+local PANEL_SLUG = "${script.slug}"
 local PANEL_KEY = "${script.hmac_key}"
 
 pcall(function()
-    local sdk = loadstring(game:HttpGet(PANEL_URL .. "/sdk/monitor_sdk.lua"))()
-    sdk.monitor(PANEL_URL, PANEL_SCRIPT, PANEL_KEY)
+    local cacheBust = tostring(os.clock()):gsub("%.", "")
+    local sdk = loadstring(game:HttpGet("https://raw.githubusercontent.com/megafartCc/panel/refs/heads/main/sdk/panel_sdk.lua?cb=" .. cacheBust))()
+    sdk.init(PANEL_URL, PANEL_SLUG, PANEL_KEY)
 end)`;
 
     return (

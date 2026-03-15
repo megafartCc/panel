@@ -1,4 +1,4 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
@@ -76,10 +76,17 @@ app.use((err, req, res, next) => {
 });
 
 // --- Start ---
-migrate();
-init(); // starts the stale session cleanup timer
+(async () => {
+    try {
+        await migrate();
+        init(); // starts the stale session cleanup timer
 
-app.listen(PORT, () => {
-    console.log(`\n🚀 Panel running on http://localhost:${PORT}`);
-    console.log(`   Health: http://localhost:${PORT}/api/health\n`);
-});
+        app.listen(PORT, () => {
+            console.log(`\nPanel running on http://localhost:${PORT}`);
+            console.log(`   Health: http://localhost:${PORT}/api/health\n`);
+        });
+    } catch (err) {
+        console.error('[Startup] Failed to initialize backend:', err.message);
+        process.exit(1);
+    }
+})();

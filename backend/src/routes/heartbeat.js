@@ -1,16 +1,11 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('../db');
+const { dbGet, dbRun, toDbDateTime } = require('../db');
 
 const router = express.Router();
 
-function toSqliteDateTime(date = new Date()) {
-    return date.toISOString().slice(0, 19).replace('T', ' ');
-}
-
-// POST /api/heartbeat — called by Lua scripts every 10s
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
     try {
         const { script, user, userid, executor, jobid, timestamp, signature } = req.body;
 
@@ -18,28 +13,22 @@ router.post('/', (req, res) => {
             return res.status(400).json({ error: 'Missing fields' });
         }
 
-        // Timestamp check (120s window)
-        const now = Math.floor(Date.now() / 1000);
+        const nowSeconds = Math.floor(Date.now() / 1000);
         const ts = parseInt(timestamp, 10);
-        if (isNaN(ts) || Math.abs(now - ts) > 120) {
+        if (Number.isNaN(ts) || Math.abs(nowSeconds - ts) > 120) {
             return res.status(400).json({ error: 'Invalid timestamp' });
         }
 
-        // Look up script
-        const db = getDb();
-        const scriptRow = db.prepare('SELECT id, hmac_key, name, slug FROM scripts WHERE slug = ?').get(script);
+        const scriptRow = await dbGet('SELECT id, hmac_key, name, slug FROM scripts WHERE slug = ?', [script]);
         if (!scriptRow) {
             return res.status(404).json({ error: 'Script not found' });
         }
 
-        // Verify HMAC — executors may send hex OR base64
         const message = `${script}:${userid}:${timestamp}`;
         const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
 
-        // Convert incoming signature to hex (might be base64 or hex already)
         let sigHex = signature;
         if (/[^0-9a-fA-F]/.test(signature)) {
-            // Not hex — assume base64, convert to hex
             try {
                 sigHex = Buffer.from(signature, 'base64').toString('hex');
             } catch {
@@ -53,30 +42,31 @@ router.post('/', (req, res) => {
         }
 
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-        const nowIso = toSqliteDateTime();
+        const nowIso = toDbDateTime();
 
-        // Find existing active session for this user + script
-        const existing = db.prepare(
-            'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1'
-        ).get(scriptRow.id, String(userid));
+        const existing = await dbGet(
+            'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1',
+            [scriptRow.id, String(userid)]
+        );
 
         let sessionId;
-
         if (existing) {
             sessionId = existing.id;
-            db.prepare('UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, ip_address = ? WHERE id = ?')
-                .run(nowIso, executor || 'Unknown', jobid || '', ip, sessionId);
+            await dbRun(
+                'UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, ip_address = ? WHERE id = ?',
+                [nowIso, executor || 'Unknown', jobid || '', String(ip), sessionId]
+            );
         } else {
             sessionId = uuidv4();
-            db.prepare(
-                `INSERT INTO sessions (id, script_id, roblox_user, roblox_userid, executor, server_jobid, ip_address, first_seen, last_heartbeat, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
-            ).run(sessionId, scriptRow.id, user, String(userid), executor || 'Unknown', jobid || '', ip, nowIso, nowIso);
+            await dbRun(
+                `INSERT INTO sessions (
+                    id, script_id, roblox_user, roblox_userid, executor, server_jobid, ip_address, first_seen, last_heartbeat, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+                [sessionId, scriptRow.id, String(user), String(userid), executor || 'Unknown', jobid || '', String(ip), nowIso, nowIso]
+            );
         }
 
-        // Log heartbeat
-        db.prepare('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)').run(sessionId, nowIso);
-
+        await dbRun('INSERT INTO heartbeat_log (session_id, timestamp) VALUES (?, ?)', [sessionId, nowIso]);
         res.json({ ok: true, sessionId });
     } catch (err) {
         console.error('[Heartbeat] Error:', err.message);

@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { getDb, ensureCloudPresetSchema } = require('../db');
+const { dbAll, dbGet, dbRun, ensureCloudPresetSchema, isMySql } = require('../db');
 
 const router = express.Router();
 
@@ -39,11 +39,9 @@ if (typeof cleanupTimer.unref === 'function') {
     cleanupTimer.unref();
 }
 
-try {
-    ensureCloudPresetSchema();
-} catch (err) {
+ensureCloudPresetSchema().catch((err) => {
     console.error('[Cloud] Initial schema ensure failed:', err.message);
-}
+});
 
 function getClientIp(req) {
     const forwarded = req.headers['x-forwarded-for'];
@@ -76,12 +74,11 @@ function normalizeSignature(signature, expectedHex) {
     return signature.toLowerCase();
 }
 
-function getScriptRow(script) {
-    const db = getDb();
-    return db.prepare('SELECT id, slug, hmac_key FROM scripts WHERE slug = ?').get(script);
+async function getScriptRow(script) {
+    return dbGet('SELECT id, slug, hmac_key FROM scripts WHERE slug = ?', [script]);
 }
 
-function verifySignedScriptPayload(payload) {
+async function verifySignedScriptPayload(payload) {
     const { script, userid, timestamp, signature } = payload || {};
 
     if (!script || !userid || !timestamp || !signature) {
@@ -94,7 +91,7 @@ function verifySignedScriptPayload(payload) {
         return { ok: false, status: 400, error: 'Invalid timestamp' };
     }
 
-    const scriptRow = getScriptRow(script);
+    const scriptRow = await getScriptRow(script);
     if (!scriptRow) {
         return { ok: false, status: 404, error: 'Script not found' };
     }
@@ -146,7 +143,6 @@ function normalizePresetName(value) {
         return null;
     }
 
-    // Reject non-printable control characters.
     if (/[\u0000-\u001f\u007f]/.test(text)) {
         return null;
     }
@@ -225,34 +221,32 @@ function checkRateLimit(scriptSlug, usernameNormalized, ip) {
     return { ok: true };
 }
 
-function getUsageCount(db, scriptId, usernameNormalized) {
-    const row = db.prepare(`
-        SELECT COUNT(*) AS total
-        FROM cloud_presets
-        WHERE script_id = ? AND username_normalized = ?
-    `).get(scriptId, usernameNormalized);
+async function getUsageCount(scriptId, usernameNormalized) {
+    const row = await dbGet(
+        'SELECT COUNT(*) AS total FROM cloud_presets WHERE script_id = ? AND username_normalized = ?',
+        [scriptId, usernameNormalized]
+    );
     return Number(row?.total || 0);
 }
 
-function getGlobalUsageCount(db, usernameNormalized) {
-    const row = db.prepare(`
-        SELECT COUNT(*) AS total
-        FROM cloud_presets
-        WHERE username_normalized = ?
-    `).get(usernameNormalized);
+async function getGlobalUsageCount(usernameNormalized) {
+    const row = await dbGet(
+        'SELECT COUNT(*) AS total FROM cloud_presets WHERE username_normalized = ?',
+        [usernameNormalized]
+    );
     return Number(row?.total || 0);
 }
 
-function validateAndExtractOwner(req, res) {
+async function validateAndExtractOwner(req, res) {
     try {
-        ensureCloudPresetSchema();
+        await ensureCloudPresetSchema();
     } catch (err) {
         console.error('[Cloud] Schema ensure failed:', err.message);
         res.status(500).json({ error: 'Cloud schema setup failed' });
         return null;
     }
 
-    const verification = verifySignedScriptPayload(req.body);
+    const verification = await verifySignedScriptPayload(req.body);
     if (!verification.ok) {
         res.status(verification.status).json({ error: verification.error });
         return null;
@@ -278,9 +272,9 @@ function validateAndExtractOwner(req, res) {
     return { verification, owner, ip };
 }
 
-router.post('/save', (req, res) => {
+router.post('/save', async (req, res) => {
     try {
-        const scope = validateAndExtractOwner(req, res);
+        const scope = await validateAndExtractOwner(req, res);
         if (!scope) {
             return;
         }
@@ -295,20 +289,18 @@ router.post('/save', (req, res) => {
             return res.status(encodedData.status).json({ error: encodedData.error });
         }
 
-        const db = getDb();
         const scriptId = scope.verification.scriptRow.id;
         const username = scope.owner.display;
         const usernameNormalized = scope.owner.normalized;
         const robloxUserId = String(req.body.userid);
 
-        const existing = db.prepare(`
-            SELECT id
-            FROM cloud_presets
-            WHERE script_id = ? AND username_normalized = ? AND preset_name = ?
-        `).get(scriptId, usernameNormalized, presetName);
+        const existing = await dbGet(
+            'SELECT id FROM cloud_presets WHERE script_id = ? AND username_normalized = ? AND preset_name = ?',
+            [scriptId, usernameNormalized, presetName]
+        );
 
         if (!existing) {
-            const usageCount = getUsageCount(db, scriptId, usernameNormalized);
+            const usageCount = await getUsageCount(scriptId, usernameNormalized);
             if (usageCount >= MAX_PRESETS_PER_USER) {
                 return res.status(429).json({
                     error: `Preset limit reached (${MAX_PRESETS_PER_USER})`,
@@ -317,7 +309,7 @@ router.post('/save', (req, res) => {
                 });
             }
 
-            const globalUsage = getGlobalUsageCount(db, usernameNormalized);
+            const globalUsage = await getGlobalUsageCount(usernameNormalized);
             if (globalUsage >= MAX_PRESETS_PER_USER_GLOBAL) {
                 return res.status(429).json({
                     error: `Global preset limit reached (${MAX_PRESETS_PER_USER_GLOBAL})`,
@@ -327,37 +319,53 @@ router.post('/save', (req, res) => {
             }
         }
 
-        db.prepare(`
-            INSERT INTO cloud_presets (
-                script_id,
-                username,
-                username_normalized,
-                roblox_userid,
-                preset_name,
-                data_json,
-                last_ip,
-                created_at,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-            ON CONFLICT(script_id, username_normalized, preset_name)
-            DO UPDATE SET
-                username = excluded.username,
-                roblox_userid = excluded.roblox_userid,
-                data_json = excluded.data_json,
-                last_ip = excluded.last_ip,
-                updated_at = datetime('now')
-        `).run(
-            scriptId,
-            username,
-            usernameNormalized,
-            robloxUserId,
-            presetName,
-            encodedData.encoded,
-            scope.ip,
-        );
+        if (isMySql()) {
+            await dbRun(
+                `INSERT INTO cloud_presets (
+                    script_id,
+                    username,
+                    username_normalized,
+                    roblox_userid,
+                    preset_name,
+                    data_json,
+                    last_ip,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    username = VALUES(username),
+                    roblox_userid = VALUES(roblox_userid),
+                    data_json = VALUES(data_json),
+                    last_ip = VALUES(last_ip),
+                    updated_at = NOW()`,
+                [scriptId, username, usernameNormalized, robloxUserId, presetName, encodedData.encoded, scope.ip]
+            );
+        } else {
+            await dbRun(
+                `INSERT INTO cloud_presets (
+                    script_id,
+                    username,
+                    username_normalized,
+                    roblox_userid,
+                    preset_name,
+                    data_json,
+                    last_ip,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                ON CONFLICT(script_id, username_normalized, preset_name)
+                DO UPDATE SET
+                    username = excluded.username,
+                    roblox_userid = excluded.roblox_userid,
+                    data_json = excluded.data_json,
+                    last_ip = excluded.last_ip,
+                    updated_at = datetime('now')`,
+                [scriptId, username, usernameNormalized, robloxUserId, presetName, encodedData.encoded, scope.ip]
+            );
+        }
 
-        const usageCount = getUsageCount(db, scriptId, usernameNormalized);
-        const globalUsage = getGlobalUsageCount(db, usernameNormalized);
+        const usageCount = await getUsageCount(scriptId, usernameNormalized);
+        const globalUsage = await getGlobalUsageCount(usernameNormalized);
         return res.json({
             ok: true,
             preset: presetName,
@@ -373,31 +381,27 @@ router.post('/save', (req, res) => {
     }
 });
 
-router.post('/list', (req, res) => {
+router.post('/list', async (req, res) => {
     try {
-        const scope = validateAndExtractOwner(req, res);
+        const scope = await validateAndExtractOwner(req, res);
         if (!scope) {
             return;
         }
 
-        const db = getDb();
-        const rows = db.prepare(`
-            SELECT preset_name, created_at, updated_at
-            FROM cloud_presets
-            WHERE script_id = ? AND username_normalized = ?
-            ORDER BY datetime(replace(substr(updated_at, 1, 19), 'T', ' ')) DESC, preset_name ASC
-            LIMIT ?
-        `).all(
-            scope.verification.scriptRow.id,
-            scope.owner.normalized,
-            MAX_PRESETS_PER_USER,
+        const rows = await dbAll(
+            `SELECT preset_name, created_at, updated_at
+             FROM cloud_presets
+             WHERE script_id = ? AND username_normalized = ?
+             ORDER BY updated_at DESC, preset_name ASC
+             LIMIT ?`,
+            [scope.verification.scriptRow.id, scope.owner.normalized, MAX_PRESETS_PER_USER]
         );
 
         return res.json({
             ok: true,
             slotsUsed: rows.length,
             slotsMax: MAX_PRESETS_PER_USER,
-            globalSlotsUsed: getGlobalUsageCount(db, scope.owner.normalized),
+            globalSlotsUsed: await getGlobalUsageCount(scope.owner.normalized),
             globalSlotsMax: MAX_PRESETS_PER_USER_GLOBAL,
             presets: rows.map((row) => ({
                 name: row.preset_name,
@@ -411,9 +415,9 @@ router.post('/list', (req, res) => {
     }
 });
 
-router.post('/load', (req, res) => {
+router.post('/load', async (req, res) => {
     try {
-        const scope = validateAndExtractOwner(req, res);
+        const scope = await validateAndExtractOwner(req, res);
         if (!scope) {
             return;
         }
@@ -423,15 +427,11 @@ router.post('/load', (req, res) => {
             return res.status(400).json({ error: 'Invalid preset name' });
         }
 
-        const db = getDb();
-        const row = db.prepare(`
-            SELECT preset_name, data_json, created_at, updated_at
-            FROM cloud_presets
-            WHERE script_id = ? AND username_normalized = ? AND preset_name = ?
-        `).get(
-            scope.verification.scriptRow.id,
-            scope.owner.normalized,
-            presetName,
+        const row = await dbGet(
+            `SELECT preset_name, data_json, created_at, updated_at
+             FROM cloud_presets
+             WHERE script_id = ? AND username_normalized = ? AND preset_name = ?`,
+            [scope.verification.scriptRow.id, scope.owner.normalized, presetName]
         );
 
         if (!row) {
@@ -456,9 +456,9 @@ router.post('/load', (req, res) => {
     }
 });
 
-router.post('/delete', (req, res) => {
+router.post('/delete', async (req, res) => {
     try {
-        const scope = validateAndExtractOwner(req, res);
+        const scope = await validateAndExtractOwner(req, res);
         if (!scope) {
             return;
         }
@@ -468,23 +468,18 @@ router.post('/delete', (req, res) => {
             return res.status(400).json({ error: 'Invalid preset name' });
         }
 
-        const db = getDb();
-        const result = db.prepare(`
-            DELETE FROM cloud_presets
-            WHERE script_id = ? AND username_normalized = ? AND preset_name = ?
-        `).run(
-            scope.verification.scriptRow.id,
-            scope.owner.normalized,
-            presetName,
+        const result = await dbRun(
+            'DELETE FROM cloud_presets WHERE script_id = ? AND username_normalized = ? AND preset_name = ?',
+            [scope.verification.scriptRow.id, scope.owner.normalized, presetName]
         );
 
-        const usageCount = getUsageCount(db, scope.verification.scriptRow.id, scope.owner.normalized);
+        const usageCount = await getUsageCount(scope.verification.scriptRow.id, scope.owner.normalized);
         return res.json({
             ok: true,
             deleted: (result.changes || 0) > 0,
             slotsUsed: usageCount,
             slotsMax: MAX_PRESETS_PER_USER,
-            globalSlotsUsed: getGlobalUsageCount(db, scope.owner.normalized),
+            globalSlotsUsed: await getGlobalUsageCount(scope.owner.normalized),
             globalSlotsMax: MAX_PRESETS_PER_USER_GLOBAL,
         });
     } catch (err) {
@@ -493,20 +488,19 @@ router.post('/delete', (req, res) => {
     }
 });
 
-router.post('/quota', (req, res) => {
+router.post('/quota', async (req, res) => {
     try {
-        const scope = validateAndExtractOwner(req, res);
+        const scope = await validateAndExtractOwner(req, res);
         if (!scope) {
             return;
         }
 
-        const db = getDb();
-        const usageCount = getUsageCount(db, scope.verification.scriptRow.id, scope.owner.normalized);
+        const usageCount = await getUsageCount(scope.verification.scriptRow.id, scope.owner.normalized);
         return res.json({
             ok: true,
             slotsUsed: usageCount,
             slotsMax: MAX_PRESETS_PER_USER,
-            globalSlotsUsed: getGlobalUsageCount(db, scope.owner.normalized),
+            globalSlotsUsed: await getGlobalUsageCount(scope.owner.normalized),
             globalSlotsMax: MAX_PRESETS_PER_USER_GLOBAL,
             username: scope.owner.display,
         });

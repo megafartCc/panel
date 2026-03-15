@@ -1,120 +1,147 @@
 const express = require('express');
-const { getDb } = require('../db');
+const { dbAll, dbGet, getCutoffDateTime } = require('../db');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
-const ACTIVE_WINDOW_SQL = `-${ACTIVE_SESSION_TIMEOUT_SECONDS} seconds`;
-const NORMALIZED_LAST_HEARTBEAT_SQL = "datetime(replace(substr(sess.last_heartbeat, 1, 19), 'T', ' '))";
-const NORMALIZED_FIRST_SEEN_SQL = "datetime(replace(substr(first_seen, 1, 19), 'T', ' '))";
-const NORMALIZED_HEARTBEAT_LOG_SQL = "datetime(replace(substr(timestamp, 1, 19), 'T', ' '))";
 
 router.use(authMiddleware);
 
-// GET /api/sessions — list active sessions, optionally filtered by script slug
-router.get('/', (req, res) => {
-    const db = getDb();
-    const { script, limit = 100, offset = 0 } = req.query;
+router.get('/', async (req, res) => {
+    try {
+        const { script, limit = 100, offset = 0 } = req.query;
+        const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 100, 500));
+        const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+        const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS);
 
-    let query, params;
+        let sessionsSql = `
+            SELECT sess.*, s.name AS script_name, s.slug AS script_slug
+            FROM sessions sess
+            JOIN scripts s ON sess.script_id = s.id
+            WHERE sess.is_active = 1
+                AND sess.last_heartbeat >= ?
+        `;
+        const sessionsParams = [activeCutoff];
 
-    if (script) {
-        query = `
-      SELECT sess.*, s.name as script_name, s.slug as script_slug
-      FROM sessions sess
-      JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1 AND ${NORMALIZED_LAST_HEARTBEAT_SQL} >= datetime('now', ?) AND s.slug = ?
-      ORDER BY sess.last_heartbeat DESC
-      LIMIT ? OFFSET ?
-    `;
-        params = [ACTIVE_WINDOW_SQL, script, parseInt(limit), parseInt(offset)];
-    } else {
-        query = `
-      SELECT sess.*, s.name as script_name, s.slug as script_slug
-      FROM sessions sess
-      JOIN scripts s ON sess.script_id = s.id
-      WHERE sess.is_active = 1 AND ${NORMALIZED_LAST_HEARTBEAT_SQL} >= datetime('now', ?)
-      ORDER BY sess.last_heartbeat DESC
-      LIMIT ? OFFSET ?
-    `;
-        params = [ACTIVE_WINDOW_SQL, parseInt(limit), parseInt(offset)];
+        if (script) {
+            sessionsSql += ' AND s.slug = ?';
+            sessionsParams.push(String(script));
+        }
+
+        sessionsSql += `
+            ORDER BY sess.last_heartbeat DESC
+            LIMIT ? OFFSET ?
+        `;
+        sessionsParams.push(safeLimit, safeOffset);
+
+        const sessions = await dbAll(sessionsSql, sessionsParams);
+        const totalRow = await dbGet(
+            'SELECT COUNT(*) AS count FROM sessions WHERE is_active = 1 AND last_heartbeat >= ?',
+            [activeCutoff]
+        );
+
+        res.json({
+            sessions,
+            total: Number(totalRow?.count || 0),
+        });
+    } catch (err) {
+        console.error('[Sessions] List error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    const sessions = db.prepare(query).all(...params);
-    const total = db.prepare(
-        `SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND datetime(replace(substr(last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)`
-    ).get(ACTIVE_WINDOW_SQL).count;
-
-    res.json({ sessions, total });
 });
 
-// GET /api/sessions/stats — aggregated statistics
-router.get('/stats', (req, res) => {
-    const db = getDb();
+router.get('/stats', async (req, res) => {
+    try {
+        const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS);
+        const dayCutoff = getCutoffDateTime(24 * 60 * 60);
 
-    const totalActive = db.prepare(
-        `SELECT COUNT(*) as count FROM sessions WHERE is_active = 1 AND datetime(replace(substr(last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)`
-    ).get(ACTIVE_WINDOW_SQL).count;
+        const totalActiveRow = await dbGet(
+            'SELECT COUNT(*) AS count FROM sessions WHERE is_active = 1 AND last_heartbeat >= ?',
+            [activeCutoff]
+        );
 
-    const perScript = db.prepare(`
-    SELECT s.name, s.slug, COUNT(sess.id) as active_users
-    FROM scripts s
-    LEFT JOIN sessions sess ON sess.script_id = s.id AND sess.is_active = 1 AND datetime(replace(substr(sess.last_heartbeat, 1, 19), 'T', ' ')) >= datetime('now', ?)
-    GROUP BY s.id
-    ORDER BY active_users DESC
-  `).all(ACTIVE_WINDOW_SQL);
+        const perScript = await dbAll(`
+            SELECT s.name, s.slug, COUNT(sess.id) AS active_users
+            FROM scripts s
+            LEFT JOIN sessions sess
+                ON sess.script_id = s.id
+                AND sess.is_active = 1
+                AND sess.last_heartbeat >= ?
+            GROUP BY s.id, s.name, s.slug
+            ORDER BY active_users DESC
+        `, [activeCutoff]);
 
-    const totalSessions = db.prepare(
-        'SELECT COUNT(*) as count FROM sessions'
-    ).get().count;
+        const totalSessionsRow = await dbGet('SELECT COUNT(*) AS count FROM sessions');
+        const uniqueUsersRow = await dbGet('SELECT COUNT(DISTINCT roblox_userid) AS count FROM sessions');
+        const last24hRow = await dbGet('SELECT COUNT(*) AS count FROM sessions WHERE first_seen >= ?', [dayCutoff]);
 
-    // Unique users (by roblox_userid)
-    const uniqueUsers = db.prepare(
-        'SELECT COUNT(DISTINCT roblox_userid) as count FROM sessions'
-    ).get().count;
+        const heartbeatRows = await dbAll(
+            'SELECT session_id, timestamp FROM heartbeat_log WHERE timestamp >= ? ORDER BY timestamp ASC',
+            [dayCutoff]
+        );
 
-    // Sessions in last 24h
-    const last24h = db.prepare(
-        `SELECT COUNT(*) as count FROM sessions WHERE ${NORMALIZED_FIRST_SEEN_SQL} >= datetime('now', '-24 hours')`
-    ).get().count;
+        const hourlyBuckets = new Map();
+        for (const row of heartbeatRows) {
+            const stamp = String(row.timestamp || '');
+            if (stamp.length < 13) {
+                continue;
+            }
+            const hourKey = stamp.slice(0, 13) + ':00:00';
+            let bucket = hourlyBuckets.get(hourKey);
+            if (!bucket) {
+                bucket = new Set();
+                hourlyBuckets.set(hourKey, bucket);
+            }
+            bucket.add(String(row.session_id || ''));
+        }
 
-    // Hourly activity for chart (last 24 hours)
-    const hourlyActivity = db.prepare(`
-    SELECT 
-      strftime('%Y-%m-%dT%H:00:00', ${NORMALIZED_HEARTBEAT_LOG_SQL}) as hour,
-      COUNT(DISTINCT session_id) as users
-    FROM heartbeat_log
-    WHERE ${NORMALIZED_HEARTBEAT_LOG_SQL} >= datetime('now', '-24 hours')
-    GROUP BY hour
-    ORDER BY hour ASC
-  `).all();
+        const hourlyActivity = Array.from(hourlyBuckets.entries())
+            .sort((left, right) => left[0].localeCompare(right[0]))
+            .map(([hour, users]) => ({
+                hour: hour.replace(' ', 'T'),
+                users: users.size,
+            }));
 
-    res.json({
-        totalActive,
-        perScript,
-        totalSessions,
-        uniqueUsers,
-        last24h,
-        hourlyActivity
-    });
+        res.json({
+            totalActive: Number(totalActiveRow?.count || 0),
+            perScript,
+            totalSessions: Number(totalSessionsRow?.count || 0),
+            uniqueUsers: Number(uniqueUsersRow?.count || 0),
+            last24h: Number(last24hRow?.count || 0),
+            hourlyActivity,
+        });
+    } catch (err) {
+        console.error('[Sessions] Stats error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
-// GET /api/sessions/recent — recent join/leave log
-router.get('/recent', (req, res) => {
-    const db = getDb();
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+router.get('/recent', async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+        const recent = await dbAll(`
+            SELECT
+                sess.id,
+                sess.roblox_user,
+                sess.roblox_userid,
+                sess.executor,
+                sess.server_jobid,
+                sess.first_seen,
+                sess.last_heartbeat,
+                sess.is_active,
+                s.name AS script_name,
+                s.slug AS script_slug
+            FROM sessions sess
+            JOIN scripts s ON sess.script_id = s.id
+            ORDER BY sess.last_heartbeat DESC
+            LIMIT ?
+        `, [limit]);
 
-    const recent = db.prepare(`
-    SELECT sess.id, sess.roblox_user, sess.roblox_userid, sess.executor,
-           sess.server_jobid, sess.first_seen, sess.last_heartbeat, sess.is_active,
-           s.name as script_name, s.slug as script_slug
-    FROM sessions sess
-    JOIN scripts s ON sess.script_id = s.id
-    ORDER BY sess.last_heartbeat DESC
-    LIMIT ?
-  `).all(limit);
-
-    res.json(recent);
+        res.json(recent);
+    } catch (err) {
+        console.error('[Sessions] Recent error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 
 module.exports = router;

@@ -1,22 +1,16 @@
 const express = require('express');
 const crypto = require('crypto');
-const { getDb } = require('../db');
 const { authMiddleware } = require('../middleware/auth');
+const { dbAll, dbGet, dbRun, getCutoffDateTime, isMySql, toDbDateTime } = require('../db');
 
 const router = express.Router();
 
 const SIGNATURE_WINDOW_SECONDS = 120;
 const FINDER_TTL_SECONDS = Math.max(5, Number(process.env.FINDER_SERVER_TTL_SECONDS) || 25);
-const NORMALIZED_DISCOVERED_AT_SQL = "datetime(replace(substr(fr.discovered_at, 1, 19), 'T', ' '))";
 const MAX_BRAINROTS_PER_REQUEST = 100;
 
-function toSqliteDateTime(date = new Date()) {
-    return date.toISOString().slice(0, 19).replace('T', ' ');
-}
-
-function getScriptRow(script) {
-    const db = getDb();
-    return db.prepare('SELECT id, name, slug, hmac_key FROM scripts WHERE slug = ?').get(script);
+async function getScriptRow(script) {
+    return dbGet('SELECT id, name, slug, hmac_key FROM scripts WHERE slug = ?', [script]);
 }
 
 function normalizeSignature(signature, expectedHex) {
@@ -39,7 +33,7 @@ function normalizeSignature(signature, expectedHex) {
     return signature.toLowerCase();
 }
 
-function verifySignedScriptPayload(payload) {
+async function verifySignedScriptPayload(payload) {
     const { script, userid, timestamp, signature } = payload || {};
 
     if (!script || !userid || !timestamp || !signature) {
@@ -52,7 +46,7 @@ function verifySignedScriptPayload(payload) {
         return { ok: false, status: 400, error: 'Invalid timestamp' };
     }
 
-    const scriptRow = getScriptRow(script);
+    const scriptRow = await getScriptRow(script);
     if (!scriptRow) {
         return { ok: false, status: 404, error: 'Script not found' };
     }
@@ -72,9 +66,8 @@ function verifySignedScriptPayload(payload) {
     return { ok: true, scriptRow };
 }
 
-function listFinderRows({ script, excludeJobId, limit }) {
-    const db = getDb();
-    const params = [`-${FINDER_TTL_SECONDS} seconds`];
+async function listFinderRows({ script, excludeJobId, limit }) {
+    const params = [getCutoffDateTime(FINDER_TTL_SECONDS)];
     let sql = `
         SELECT
             fr.*,
@@ -82,7 +75,7 @@ function listFinderRows({ script, excludeJobId, limit }) {
             s.name AS script_name
         FROM finder_reports fr
         JOIN scripts s ON s.id = fr.script_id
-        WHERE ${NORMALIZED_DISCOVERED_AT_SQL} >= datetime('now', ?)
+        WHERE fr.discovered_at >= ?
     `;
 
     if (script) {
@@ -101,7 +94,7 @@ function listFinderRows({ script, excludeJobId, limit }) {
     `;
     params.push(Math.max(1, Math.min(parseInt(limit, 10) || 250, 500)));
 
-    return db.prepare(sql).all(...params);
+    return dbAll(sql, params);
 }
 
 function buildFinderServers(rows) {
@@ -171,9 +164,9 @@ function buildFinderServers(rows) {
         });
 }
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
     try {
-        const verification = verifySignedScriptPayload(req.body);
+        const verification = await verifySignedScriptPayload(req.body);
         if (!verification.ok) {
             return res.status(verification.status).json({ error: verification.error });
         }
@@ -198,7 +191,7 @@ router.post('/', (req, res) => {
             return res.json({ ok: true, inserted: 0, ignored: 0, skipped: 'player_count' });
         }
 
-        const submittedAt = toSqliteDateTime();
+        const submittedAt = toDbDateTime();
         const normalizedBrainrots = [];
         const seenKeys = new Set();
 
@@ -227,9 +220,8 @@ router.post('/', (req, res) => {
             return res.json({ ok: true, inserted: 0, ignored: 0, skipped: 'empty' });
         }
 
-        const db = getDb();
-        const insertFinderRow = db.prepare(`
-            INSERT OR IGNORE INTO finder_reports (
+        const insertSql = isMySql()
+            ? `INSERT IGNORE INTO finder_reports (
                 script_id,
                 server_jobid,
                 place_id,
@@ -241,31 +233,38 @@ router.post('/', (req, res) => {
                 brainrot_name,
                 money_per_sec,
                 discovered_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            : `INSERT OR IGNORE INTO finder_reports (
+                script_id,
+                server_jobid,
+                place_id,
+                reported_by_user,
+                reported_by_userid,
+                executor,
+                player_count,
+                brainrot_key,
+                brainrot_name,
+                money_per_sec,
+                discovered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-        const insertMany = db.transaction((items) => {
-            let inserted = 0;
-            for (const item of items) {
-                const result = insertFinderRow.run(
-                    verification.scriptRow.id,
-                    String(jobid),
-                    String(placeid || ''),
-                    String(user || ''),
-                    String(userid),
-                    executor || 'Unknown',
-                    normalizedPlayerCount,
-                    item.key,
-                    item.name,
-                    item.moneyPerSec,
-                    submittedAt,
-                );
-                inserted += result.changes || 0;
-            }
-            return inserted;
-        });
-
-        const inserted = insertMany(normalizedBrainrots);
+        let inserted = 0;
+        for (const item of normalizedBrainrots) {
+            const result = await dbRun(insertSql, [
+                verification.scriptRow.id,
+                String(jobid),
+                String(placeid || ''),
+                String(user || ''),
+                String(userid),
+                executor || 'Unknown',
+                normalizedPlayerCount,
+                item.key,
+                item.name,
+                item.moneyPerSec,
+                submittedAt,
+            ]);
+            inserted += Number(result.changes || 0);
+        }
 
         res.json({
             ok: true,
@@ -280,15 +279,15 @@ router.post('/', (req, res) => {
     }
 });
 
-router.get('/feed', (req, res) => {
+router.get('/feed', async (req, res) => {
     try {
-        const verification = verifySignedScriptPayload(req.query);
+        const verification = await verifySignedScriptPayload(req.query);
         if (!verification.ok) {
             return res.status(verification.status).json({ error: verification.error });
         }
 
         const { script, exclude_jobid: excludeJobId, limit } = req.query;
-        const servers = buildFinderServers(listFinderRows({
+        const servers = buildFinderServers(await listFinderRows({
             script,
             excludeJobId,
             limit,
@@ -306,10 +305,10 @@ router.get('/feed', (req, res) => {
     }
 });
 
-router.get('/public', (req, res) => {
+router.get('/public', async (req, res) => {
     try {
         const { script, exclude_jobid: excludeJobId, limit } = req.query;
-        const servers = buildFinderServers(listFinderRows({
+        const servers = buildFinderServers(await listFinderRows({
             script,
             excludeJobId,
             limit,
@@ -328,10 +327,10 @@ router.get('/public', (req, res) => {
     }
 });
 
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
     try {
         const { script, exclude_jobid: excludeJobId, limit } = req.query;
-        const servers = buildFinderServers(listFinderRows({
+        const servers = buildFinderServers(await listFinderRows({
             script,
             excludeJobId,
             limit,

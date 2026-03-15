@@ -1,43 +1,47 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { getDb } = require('../db');
+const { dbGet } = require('../db');
 
 const router = express.Router();
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
-    const { username, password } = req.body;
+router.post('/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
 
-    if (!username || !password) {
-        return res.status(400).json({ error: 'Username and password are required' });
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+
+        if (typeof username !== 'string' || typeof password !== 'string') {
+            return res.status(400).json({ error: 'Invalid input types' });
+        }
+
+        if (username.length > 64 || password.length > 128) {
+            return res.status(400).json({ error: 'Input too long' });
+        }
+
+        const user = await dbGet('SELECT * FROM admin_users WHERE username = ?', [username]);
+
+        if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const token = jwt.sign(
+            { id: user.id, username: user.username },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            token,
+            user: { id: user.id, username: user.username }
+        });
+    } catch (err) {
+        console.error('[Auth] Login error:', err.message);
+        res.status(500).json({ error: 'Internal server error' });
     }
-
-    if (typeof username !== 'string' || typeof password !== 'string') {
-        return res.status(400).json({ error: 'Invalid input types' });
-    }
-
-    if (username.length > 64 || password.length > 128) {
-        return res.status(400).json({ error: 'Input too long' });
-    }
-
-    const db = getDb();
-    const user = db.prepare('SELECT * FROM admin_users WHERE username = ?').get(username);
-
-    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    const token = jwt.sign(
-        { id: user.id, username: user.username },
-        process.env.JWT_SECRET,
-        { expiresIn: '24h' }
-    );
-
-    res.json({
-        token,
-        user: { id: user.id, username: user.username }
-    });
 });
 
 // GET /api/auth/me — verify current token

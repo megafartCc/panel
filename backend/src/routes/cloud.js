@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { getDb } = require('../db');
+const { getDb, ensureCloudPresetSchema } = require('../db');
 
 const router = express.Router();
 
@@ -37,6 +37,12 @@ const cleanupTimer = setInterval(() => {
 
 if (typeof cleanupTimer.unref === 'function') {
     cleanupTimer.unref();
+}
+
+try {
+    ensureCloudPresetSchema();
+} catch (err) {
+    console.error('[Cloud] Initial schema ensure failed:', err.message);
 }
 
 function getClientIp(req) {
@@ -238,6 +244,14 @@ function getGlobalUsageCount(db, usernameNormalized) {
 }
 
 function validateAndExtractOwner(req, res) {
+    try {
+        ensureCloudPresetSchema();
+    } catch (err) {
+        console.error('[Cloud] Schema ensure failed:', err.message);
+        res.status(500).json({ error: 'Cloud schema setup failed' });
+        return null;
+    }
+
     const verification = verifySignedScriptPayload(req.body);
     if (!verification.ok) {
         res.status(verification.status).json({ error: verification.error });

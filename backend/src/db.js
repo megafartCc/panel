@@ -43,6 +43,45 @@ function syncSeededScript(conn, script) {
     conn.prepare('UPDATE scripts SET name = ? WHERE slug = ?').run(script.name, script.slug);
 }
 
+function ensureCloudPresetSchema(conn = getDb()) {
+    conn.exec(`
+    CREATE TABLE IF NOT EXISTS cloud_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      script_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      username_normalized TEXT NOT NULL,
+      roblox_userid TEXT NOT NULL,
+      preset_name TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      last_ip TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
+      UNIQUE(script_id, username_normalized, preset_name)
+    );
+  `);
+
+    const columns = conn.prepare('PRAGMA table_info(cloud_presets)').all();
+    const columnSet = new Set(columns.map((column) => String(column.name || '')));
+
+    const missingColumns = [
+        { name: 'last_ip', sql: "ALTER TABLE cloud_presets ADD COLUMN last_ip TEXT DEFAULT ''" },
+        { name: 'created_at', sql: "ALTER TABLE cloud_presets ADD COLUMN created_at TEXT DEFAULT (datetime('now'))" },
+        { name: 'updated_at', sql: "ALTER TABLE cloud_presets ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))" },
+    ];
+
+    for (const column of missingColumns) {
+        if (!columnSet.has(column.name)) {
+            conn.exec(column.sql);
+        }
+    }
+
+    conn.exec(`
+    CREATE INDEX IF NOT EXISTS idx_cloud_presets_owner ON cloud_presets(script_id, username_normalized, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_cloud_presets_userid ON cloud_presets(script_id, roblox_userid);
+  `);
+}
+
 function migrate() {
     const conn = getDb();
 
@@ -100,21 +139,6 @@ function migrate() {
       UNIQUE(script_id, server_jobid, brainrot_key)
     );
 
-    CREATE TABLE IF NOT EXISTS cloud_presets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      script_id TEXT NOT NULL,
-      username TEXT NOT NULL,
-      username_normalized TEXT NOT NULL,
-      roblox_userid TEXT NOT NULL,
-      preset_name TEXT NOT NULL,
-      data_json TEXT NOT NULL,
-      last_ip TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
-      UNIQUE(script_id, username_normalized, preset_name)
-    );
-
     CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
     CREATE INDEX IF NOT EXISTS idx_sessions_script ON sessions(script_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_last_hb ON sessions(last_heartbeat);
@@ -122,9 +146,9 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_heartbeat_log_session ON heartbeat_log(session_id);
     CREATE INDEX IF NOT EXISTS idx_finder_reports_script_time ON finder_reports(script_id, discovered_at);
     CREATE INDEX IF NOT EXISTS idx_finder_reports_server_time ON finder_reports(server_jobid, discovered_at);
-    CREATE INDEX IF NOT EXISTS idx_cloud_presets_owner ON cloud_presets(script_id, username_normalized, updated_at);
-    CREATE INDEX IF NOT EXISTS idx_cloud_presets_userid ON cloud_presets(script_id, roblox_userid);
   `);
+
+    ensureCloudPresetSchema(conn);
 
     // Seed default admin if none exists
     const adminUser = process.env.ADMIN_USER || 'admin';
@@ -167,4 +191,4 @@ function migrate() {
     console.log('[DB] Migrations complete');
 }
 
-module.exports = { getDb, migrate };
+module.exports = { getDb, migrate, ensureCloudPresetSchema };

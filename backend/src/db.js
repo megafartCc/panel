@@ -381,6 +381,12 @@ async function migrate() {
             envName: 'BEESWARM_HMAC_KEY',
             envKey: process.env.BEESWARM_HMAC_KEY || process.env.PANEL_BEESWARM_HMAC_KEY || sharedEnvKey,
         },
+        {
+            name: 'Forsaken',
+            slug: 'forsaken',
+            envName: 'FORSAKEN_HMAC_KEY',
+            envKey: process.env.FORSAKEN_HMAC_KEY || process.env.PANEL_FORSAKEN_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
+        },
     ];
 
     for (const script of seededScripts) {

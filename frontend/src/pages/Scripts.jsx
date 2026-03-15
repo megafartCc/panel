@@ -25,8 +25,8 @@ local PANEL_SCRIPT = "${script.slug}"
 local PANEL_KEY = "${script.hmac_key}"
 
 pcall(function()
-    local sdk = loadstring(game:HttpGet(PANEL_URL .. "/sdk/panel_sdk.lua"))()
-    sdk.init(PANEL_URL, PANEL_SCRIPT, PANEL_KEY)
+    local sdk = loadstring(game:HttpGet(PANEL_URL .. "/sdk/monitor_sdk.lua"))()
+    sdk.monitor(PANEL_URL, PANEL_SCRIPT, PANEL_KEY)
 end)`;
 
     return (

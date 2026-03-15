@@ -6,6 +6,8 @@
   Usage:
     local PanelSDK = loadstring(game:HttpGet("https://raw.githubusercontent.com/megafartCc/panel/refs/heads/main/sdk/panel_sdk.lua"))()
     PanelSDK.init("https://your-panel.up.railway.app", "sabnew", "your_hmac_key")
+    -- alias:
+    PanelSDK.monitor("https://your-panel.up.railway.app", "sabnew", "your_hmac_key")
 ]]
 
 local PanelSDK = {}
@@ -409,17 +411,31 @@ PanelSDK.cloud = {
     end,
 }
 
-function PanelSDK.init(panelUrl, scriptSlug, hmacKey)
-    if not panelUrl or not scriptSlug or not hmacKey then return end
-    panelUrl = panelUrl:gsub("/$", "")
+function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, "missing panel config"
+    end
+
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+    options = type(options) == "table" and options or {}
+
+    local initialDelay = tonumber(options.initialDelay or options.delay or 2) or 2
+    local interval = tonumber(options.interval or options.intervalSeconds or 10) or 10
+    interval = math.max(3, interval)
 
     task.spawn(function()
-        task.wait(2)
+        task.wait(math.max(0, initialDelay))
         while true do
             sendPing(panelUrl, scriptSlug, hmacKey)
-            task.wait(10) -- ping every 10 seconds
+            task.wait(interval)
         end
     end)
+
+    return true
+end
+
+function PanelSDK.init(panelUrl, scriptSlug, hmacKey, options)
+    return PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
 end
 
 return PanelSDK

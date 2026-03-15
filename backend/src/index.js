@@ -46,7 +46,7 @@ app.get('/api/health', (req, res) => {
 
 // Serve Lua SDK
 const sdkPath = path.join(__dirname, '..', '..', 'sdk', 'panel_sdk.lua');
-app.get('/sdk/panel_sdk.lua', (req, res) => {
+app.get(['/sdk/panel_sdk.lua', '/sdk/monitor_sdk.lua'], (req, res) => {
     if (fs.existsSync(sdkPath)) {
         res.type('text/plain').sendFile(sdkPath);
     } else {

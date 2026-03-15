@@ -10,11 +10,18 @@ export function usePolling(interval = 3000) {
 
     const fetchData = useCallback(async () => {
         try {
+            const scriptFilter = typeof window !== 'undefined'
+                ? (window.localStorage.getItem('panel_finder_script') || '').trim()
+                : '';
+            const finderPath = scriptFilter
+                ? `/finder/public?script=${encodeURIComponent(scriptFilter)}`
+                : '/finder/public';
+
             // apiFetch already prepends /api and returns parsed JSON
             const [sessData, statsData, finderData] = await Promise.all([
                 apiFetch('/sessions'),
                 apiFetch('/sessions/stats'),
-                apiFetch('/finder/public?script=sabnew'),
+                apiFetch(finderPath),
             ]);
 
             setSessions(sessData.sessions || []);

@@ -364,6 +364,12 @@ async function migrate() {
             envKey: process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
         },
         {
+            name: 'Escape Tsunami',
+            slug: 'escape_tsunami',
+            envName: 'ESCAPE_TSUNAMI_HMAC_KEY',
+            envKey: process.env.ESCAPE_TSUNAMI_HMAC_KEY || process.env.PANEL_ESCAPE_TSUNAMI_HMAC_KEY || sharedEnvKey,
+        },
+        {
             name: 'Fisch',
             slug: 'fisch',
             envName: 'FISCH_HMAC_KEY',

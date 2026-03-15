@@ -238,29 +238,176 @@ local function trySendRequest(requestFn, url, body)
     return false, nil
 end
 
+local function extractStatusCode(response)
+    if type(response) ~= "table" then
+        return 0
+    end
+    local status = response.StatusCode or response.status or response.Status or response.code
+    return tonumber(status) or 0
+end
+
+local function extractBody(response)
+    if type(response) ~= "table" then
+        return nil
+    end
+    return response.Body or response.body
+end
+
+local function postJson(panelUrl, path, payload)
+    local requestFn = getRequestFunction()
+    if not requestFn then
+        return false, { error = "request function unavailable" }
+    end
+
+    local okEncode, body = pcall(function()
+        return HttpService:JSONEncode(payload)
+    end)
+    if not okEncode then
+        return false, { error = "json encode failed" }
+    end
+
+    local okRequest, response = trySendRequest(requestFn, panelUrl .. path, body)
+    if not okRequest or response == nil then
+        return false, { error = "request failed" }
+    end
+
+    local statusCode = extractStatusCode(response)
+    local rawBody = extractBody(response)
+
+    local decoded
+    if type(rawBody) == "string" and rawBody ~= "" then
+        local okDecode, parsed = pcall(function()
+            return HttpService:JSONDecode(rawBody)
+        end)
+        if okDecode then
+            decoded = parsed
+        end
+    end
+
+    if statusCode >= 200 and statusCode < 300 then
+        if type(decoded) == "table" then
+            return true, decoded
+        end
+        return true, { ok = true, statusCode = statusCode }
+    end
+
+    if type(decoded) == "table" then
+        decoded.statusCode = decoded.statusCode or statusCode
+        return false, decoded
+    end
+
+    return false, {
+        error = "HTTP " .. tostring(statusCode),
+        statusCode = statusCode,
+    }
+end
+
+local function buildSignedPayload(scriptSlug, hmacKey, extra)
+    local timestamp = tostring(math.floor(os.time()))
+    local userid = tostring(lp.UserId)
+    local signature = computeHmac(hmacKey, scriptSlug .. ":" .. userid .. ":" .. timestamp)
+    if not signature then
+        return nil
+    end
+
+    local payload = {
+        script = scriptSlug,
+        user = lp.Name,
+        userid = userid,
+        timestamp = timestamp,
+        signature = signature,
+    }
+
+    if type(extra) == "table" then
+        for key, value in pairs(extra) do
+            payload[key] = value
+        end
+    end
+
+    return payload
+end
+
+local function sendSignedRequest(panelUrl, scriptSlug, hmacKey, path, extra)
+    local payload = buildSignedPayload(scriptSlug, hmacKey, extra)
+    if not payload then
+        return false, { error = "hmac unavailable" }
+    end
+    return postJson(panelUrl, path, payload)
+end
+
 local function sendPing(panelUrl, scriptSlug, hmacKey)
     pcall(function()
-        local timestamp = tostring(math.floor(os.time()))
-        local userid = tostring(lp.UserId)
-        local sig = computeHmac(hmacKey, scriptSlug .. ":" .. userid .. ":" .. timestamp)
-        if not sig then return end
-
-        local body = HttpService:JSONEncode({
-            script = scriptSlug,
-            user = lp.Name,
-            userid = userid,
+        sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat", {
             executor = getExecutorName(),
             jobid = game.JobId or "",
-            timestamp = timestamp,
-            signature = sig
         })
-
-        local requestFn = getRequestFunction()
-        if requestFn then
-            trySendRequest(requestFn, panelUrl .. "/api/heartbeat", body)
-        end
     end)
 end
+
+function PanelSDK.cloudSave(panelUrl, scriptSlug, hmacKey, presetName, data)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/cloud/save", {
+        preset = tostring(presetName or ""),
+        data = data,
+    })
+end
+
+function PanelSDK.cloudLoad(panelUrl, scriptSlug, hmacKey, presetName)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/cloud/load", {
+        preset = tostring(presetName or ""),
+    })
+end
+
+function PanelSDK.cloudList(panelUrl, scriptSlug, hmacKey)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/cloud/list", {})
+end
+
+function PanelSDK.cloudDelete(panelUrl, scriptSlug, hmacKey, presetName)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/cloud/delete", {
+        preset = tostring(presetName or ""),
+    })
+end
+
+function PanelSDK.cloudQuota(panelUrl, scriptSlug, hmacKey)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/cloud/quota", {})
+end
+
+PanelSDK.cloud = {
+    save = function(...)
+        return PanelSDK.cloudSave(...)
+    end,
+    load = function(...)
+        return PanelSDK.cloudLoad(...)
+    end,
+    list = function(...)
+        return PanelSDK.cloudList(...)
+    end,
+    delete = function(...)
+        return PanelSDK.cloudDelete(...)
+    end,
+    quota = function(...)
+        return PanelSDK.cloudQuota(...)
+    end,
+}
 
 function PanelSDK.init(panelUrl, scriptSlug, hmacKey)
     if not panelUrl or not scriptSlug or not hmacKey then return end

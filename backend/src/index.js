@@ -14,6 +14,7 @@ const heartbeatRoutes = require('./routes/heartbeat');
 const scriptsRoutes = require('./routes/scripts');
 const sessionsRoutes = require('./routes/sessions');
 const finderRoutes = require('./routes/finder');
+const cloudRoutes = require('./routes/cloud');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +37,7 @@ app.use('/api/heartbeat', heartbeatRoutes);
 app.use('/api/scripts', scriptsRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/finder', finderRoutes);
+app.use('/api/cloud', cloudRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

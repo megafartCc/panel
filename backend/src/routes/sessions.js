@@ -74,6 +74,26 @@ router.get('/stats', async (req, res) => {
         const totalSessionsRow = await dbGet('SELECT COUNT(*) AS count FROM sessions');
         const uniqueUsersRow = await dbGet('SELECT COUNT(DISTINCT roblox_userid) AS count FROM sessions');
         const last24hRow = await dbGet('SELECT COUNT(*) AS count FROM sessions WHERE first_seen >= ?', [dayCutoff]);
+        const returningConnectionsRow = await dbGet(`
+            SELECT COALESCE(SUM(repeat_runs), 0) AS count
+            FROM (
+                SELECT CASE
+                    WHEN COUNT(*) > 1 THEN COUNT(*) - 1
+                    ELSE 0
+                END AS repeat_runs
+                FROM sessions
+                GROUP BY script_id, roblox_userid
+            ) grouped_runs
+        `);
+        const returningUsersRow = await dbGet(`
+            SELECT COUNT(*) AS count
+            FROM (
+                SELECT roblox_userid
+                FROM sessions
+                GROUP BY roblox_userid
+                HAVING COUNT(*) >= 2
+            ) grouped_users
+        `);
 
         const heartbeatRows = await dbAll(
             'SELECT session_id, timestamp FROM heartbeat_log WHERE timestamp >= ? ORDER BY timestamp ASC',
@@ -108,6 +128,8 @@ router.get('/stats', async (req, res) => {
             totalSessions: Number(totalSessionsRow?.count || 0),
             uniqueUsers: Number(uniqueUsersRow?.count || 0),
             last24h: Number(last24hRow?.count || 0),
+            returningConnections: Number(returningConnectionsRow?.count || 0),
+            returningUsers: Number(returningUsersRow?.count || 0),
             hourlyActivity,
         });
     } catch (err) {

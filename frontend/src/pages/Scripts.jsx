@@ -195,7 +195,7 @@ export default function Scripts() {
                         </div>
                         <div>
                             <h3 className="text-2xl font-semibold text-zinc-950">Register new script</h3>
-                            <p className="text-sm text-zinc-500">Keep slug short, stable, and lowercase.</p>
+                            <p className="text-sm text-zinc-500">Keep slug short, stable, lowercase, and URL-safe.</p>
                         </div>
                     </div>
 
@@ -223,9 +223,9 @@ export default function Scripts() {
                             <input
                                 id="script-slug"
                                 type="text"
-                                placeholder="script_slug"
+                                placeholder="script-slug"
                                 value={newSlug}
-                                onChange={(event) => setNewSlug(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                                onChange={(event) => setNewSlug(event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
                                 className="input"
                                 required
                             />

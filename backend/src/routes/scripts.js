@@ -44,8 +44,8 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ error: 'Invalid input types' });
         }
 
-        if (!/^[a-z0-9_]+$/.test(slug) || slug.length > 32) {
-            return res.status(400).json({ error: 'Slug must be lowercase alphanumeric with underscores, max 32 chars' });
+        if (!/^[a-z0-9_-]+$/.test(slug) || slug.length > 32) {
+            return res.status(400).json({ error: 'Slug must be lowercase alphanumeric with underscores or hyphens, max 32 chars' });
         }
 
         if (name.length > 64) {

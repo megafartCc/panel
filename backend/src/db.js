@@ -387,6 +387,12 @@ async function migrate() {
             envName: 'FORSAKEN_HMAC_KEY',
             envKey: process.env.FORSAKEN_HMAC_KEY || process.env.PANEL_FORSAKEN_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
         },
+        {
+            name: 'Jujutsu Shenanigans',
+            slug: 'jujutsu-shenanigans',
+            envName: 'JUJUTSU_SHENANIGANS_HMAC_KEY',
+            envKey: process.env.JUJUTSU_SHENANIGANS_HMAC_KEY || process.env.PANEL_JUJUTSU_SHENANIGANS_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
+        },
     ];
 
     for (const script of seededScripts) {

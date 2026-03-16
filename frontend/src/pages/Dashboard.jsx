@@ -227,9 +227,14 @@ export default function Dashboard() {
         };
     }, [activePerScript]);
 
+    const returningConnections = stats?.returningConnections || 0;
+    const returningUsers = stats?.returningUsers || 0;
+
     const statCards = [
         { label: 'Current players connected', value: totalActive, icon: SignalHigh },
         { label: 'Daily connections', value: last24h, icon: CalendarDays },
+        { label: 'Returning connections', value: returningConnections, icon: Clock3 },
+        { label: 'Returning users', value: returningUsers, icon: UsersRound },
         { label: 'Unique users', value: uniqueUsers, icon: UsersRound },
         { label: 'Total sessions', value: totalSessions, icon: Clock3 },
     ];
@@ -242,7 +247,7 @@ export default function Dashboard() {
 
     return (
         <div className="space-y-6">
-            <section className="grid gap-4 xl:grid-cols-4">
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {statCards.map((card) => (
                     <article key={card.label} className="panel p-5">
                         <div className="flex items-start justify-between gap-4">

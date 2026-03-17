@@ -312,10 +312,7 @@ local function extractBody(response)
     return response.Body or response.body
 end
 
-local function debugWarn(enabled, ...)
-    if enabled then
-        warn(...)
-    end
+local function debugWarn()
 end
 
 local function summarizeError(response)

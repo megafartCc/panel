@@ -175,4 +175,213 @@ router.post('/peers', async (req, res) => {
     }
 });
 
+router.post('/connections', async (req, res) => {
+    try {
+        const { script, userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = req.body || {};
+
+        if (!script || !userid || !timestamp || !signature) {
+            return res.status(400).json({ error: 'Missing fields' });
+        }
+
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const ts = parseInt(timestamp, 10);
+        if (Number.isNaN(ts) || Math.abs(nowSeconds - ts) > 120) {
+            return res.status(400).json({ error: 'Invalid timestamp' });
+        }
+
+        const scriptRow = await dbGet('SELECT id, hmac_key FROM scripts WHERE slug = ?', [script]);
+        if (!scriptRow) {
+            return res.status(404).json({ error: 'Script not found' });
+        }
+
+        const message = `${script}:${userid}:${timestamp}`;
+        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
+
+        let sigHex = signature;
+        if (/[^0-9a-fA-F]/.test(signature)) {
+            try {
+                sigHex = Buffer.from(signature, 'base64').toString('hex');
+            } catch {
+                return res.status(401).json({ error: 'Invalid signature format' });
+            }
+        }
+
+        if (sigHex.length !== expectedHex.length ||
+            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
+            return res.status(401).json({ error: 'Invalid signature' });
+        }
+
+        const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
+        const rows = await dbAll(
+            `SELECT roblox_userid, server_jobid
+             FROM sessions
+             WHERE script_id = ?
+                AND is_active = 1
+                AND last_heartbeat >= ?`,
+            [scriptRow.id, activeCutoff]
+        );
+
+        const requesterId = String(userid);
+        const normalizedJobId = String(jobid || '').trim();
+        const allowSelf = includeSelfRaw !== false
+            && includeSelf !== false
+            && String(includeSelfRaw || includeSelf || '').toLowerCase() !== 'false';
+
+        const seenUsers = new Set();
+        const uniqueServers = new Set();
+        let currentServerActive = 0;
+
+        for (const row of rows) {
+            const rowUserId = row && row.roblox_userid != null ? String(row.roblox_userid) : '';
+            if (rowUserId === '') {
+                continue;
+            }
+            if (!allowSelf && rowUserId === requesterId) {
+                continue;
+            }
+            if (seenUsers.has(rowUserId)) {
+                continue;
+            }
+            seenUsers.add(rowUserId);
+
+            const serverJobId = row && row.server_jobid != null ? String(row.server_jobid).trim() : '';
+            if (serverJobId !== '') {
+                uniqueServers.add(serverJobId);
+                if (normalizedJobId !== '' && serverJobId === normalizedJobId) {
+                    currentServerActive += 1;
+                }
+            }
+        }
+
+        res.json({
+            ok: true,
+            script: String(script),
+            total_active: seenUsers.size,
+            total_servers: uniqueServers.size,
+            current_server_active: currentServerActive,
+        });
+    } catch (err) {
+        console.error('[Heartbeat] connections error:', err.message);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+router.post('/servers', async (req, res) => {
+    try {
+        const { script, userid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = req.body || {};
+
+        if (!script || !userid || !timestamp || !signature) {
+            return res.status(400).json({ error: 'Missing fields' });
+        }
+
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const ts = parseInt(timestamp, 10);
+        if (Number.isNaN(ts) || Math.abs(nowSeconds - ts) > 120) {
+            return res.status(400).json({ error: 'Invalid timestamp' });
+        }
+
+        const scriptRow = await dbGet('SELECT id, hmac_key FROM scripts WHERE slug = ?', [script]);
+        if (!scriptRow) {
+            return res.status(404).json({ error: 'Script not found' });
+        }
+
+        const message = `${script}:${userid}:${timestamp}`;
+        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
+
+        let sigHex = signature;
+        if (/[^0-9a-fA-F]/.test(signature)) {
+            try {
+                sigHex = Buffer.from(signature, 'base64').toString('hex');
+            } catch {
+                return res.status(401).json({ error: 'Invalid signature format' });
+            }
+        }
+
+        if (sigHex.length !== expectedHex.length ||
+            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
+            return res.status(401).json({ error: 'Invalid signature' });
+        }
+
+        const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
+        const rows = await dbAll(
+            `SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
+             FROM sessions
+             WHERE script_id = ?
+                AND is_active = 1
+                AND last_heartbeat >= ?
+             ORDER BY last_heartbeat DESC
+             LIMIT 600`,
+            [scriptRow.id, activeCutoff]
+        );
+
+        const requesterId = String(userid);
+        const allowSelf = includeSelfRaw !== false
+            && includeSelf !== false
+            && String(includeSelfRaw || includeSelf || '').toLowerCase() !== 'false';
+
+        const grouped = new Map();
+        const globalSeen = new Set();
+
+        for (const row of rows) {
+            const rowUser = row && row.roblox_user != null ? String(row.roblox_user) : '';
+            const rowUserId = row && row.roblox_userid != null ? String(row.roblox_userid) : '';
+            const rowJobId = row && row.server_jobid != null ? String(row.server_jobid).trim() : '';
+            const rowPlaceId = row && row.place_id != null ? String(row.place_id).trim() : '';
+
+            if (rowJobId === '' || rowUserId === '') {
+                continue;
+            }
+            if (!allowSelf && rowUserId === requesterId) {
+                continue;
+            }
+            if (globalSeen.has(rowUserId)) {
+                continue;
+            }
+            globalSeen.add(rowUserId);
+
+            if (!grouped.has(rowJobId)) {
+                grouped.set(rowJobId, {
+                    jobid: rowJobId,
+                    placeid: rowPlaceId,
+                    join_url: rowPlaceId !== '' && rowJobId !== ''
+                        ? `roblox://placeID=${rowPlaceId}&gameInstanceId=${rowJobId}`
+                        : '',
+                    users: [],
+                    count: 0,
+                    last_heartbeat: row && row.last_heartbeat ? row.last_heartbeat : null,
+                });
+            }
+
+            const bucket = grouped.get(rowJobId);
+            bucket.users.push({
+                user: rowUser,
+                userid: rowUserId,
+                last_heartbeat: row && row.last_heartbeat ? row.last_heartbeat : null,
+            });
+            bucket.count += 1;
+        }
+
+        const servers = Array.from(grouped.values())
+            .sort((a, b) => {
+                const countA = Number(a && a.count) || 0;
+                const countB = Number(b && b.count) || 0;
+                if (countA !== countB) {
+                    return countB - countA;
+                }
+                return String(a && a.jobid || '').localeCompare(String(b && b.jobid || ''));
+            });
+
+        res.json({
+            ok: true,
+            script: String(script),
+            total_servers: servers.length,
+            total_users: globalSeen.size,
+            servers,
+        });
+    } catch (err) {
+        console.error('[Heartbeat] servers error:', err.message);
+        res.status(500).json({ error: 'Internal error' });
+    }
+});
+
 module.exports = router;

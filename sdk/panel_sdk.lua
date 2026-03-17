@@ -449,6 +449,33 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
     })
 end
 
+function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+
+    options = type(options) == "table" and options or {}
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/connections", {
+        jobid = tostring(options.jobid or game.JobId or ""),
+        include_self = options.includeSelf ~= false and options.include_self ~= false,
+    })
+end
+
+function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+
+    options = type(options) == "table" and options or {}
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/servers", {
+        include_self = options.includeSelf == true or options.include_self == true,
+    })
+end
+
 function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
     if not panelUrl or not scriptSlug or not hmacKey then
         return false, { error = "missing panel config" }

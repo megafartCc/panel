@@ -8,7 +8,7 @@ const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(3, Number(process.env.SESSION_TI
 
 router.post('/', async (req, res) => {
     try {
-        const { script, user, userid, executor, jobid, timestamp, signature } = req.body;
+        const { script, user, userid, executor, jobid, placeid, timestamp, signature } = req.body;
 
         if (!script || !user || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -44,6 +44,7 @@ router.post('/', async (req, res) => {
 
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
         const nowIso = toDbDateTime();
+        const normalizedPlaceId = String(placeid || '').trim();
 
         const existing = await dbGet(
             'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1',
@@ -54,16 +55,16 @@ router.post('/', async (req, res) => {
         if (existing) {
             sessionId = existing.id;
             await dbRun(
-                'UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, ip_address = ? WHERE id = ?',
-                [nowIso, executor || 'Unknown', jobid || '', String(ip), sessionId]
+                'UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, place_id = ?, ip_address = ? WHERE id = ?',
+                [nowIso, executor || 'Unknown', jobid || '', normalizedPlaceId, String(ip), sessionId]
             );
         } else {
             sessionId = uuidv4();
             await dbRun(
                 `INSERT INTO sessions (
-                    id, script_id, roblox_user, roblox_userid, executor, server_jobid, ip_address, first_seen, last_heartbeat, is_active
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-                [sessionId, scriptRow.id, String(user), String(userid), executor || 'Unknown', jobid || '', String(ip), nowIso, nowIso]
+                    id, script_id, roblox_user, roblox_userid, executor, server_jobid, place_id, ip_address, first_seen, last_heartbeat, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+                [sessionId, scriptRow.id, String(user), String(userid), executor || 'Unknown', jobid || '', normalizedPlaceId, String(ip), nowIso, nowIso]
             );
         }
 
@@ -113,7 +114,7 @@ router.post('/peers', async (req, res) => {
 
         const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
         let query = `
-            SELECT roblox_user, roblox_userid, server_jobid, last_heartbeat
+            SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
             FROM sessions
             WHERE script_id = ?
                 AND is_active = 1
@@ -153,6 +154,10 @@ router.post('/peers', async (req, res) => {
                 user: rowUser,
                 userid: rowUserId,
                 jobid: row && row.server_jobid != null ? String(row.server_jobid) : '',
+                placeid: row && row.place_id != null ? String(row.place_id) : '',
+                join_url: row && row.place_id && row.server_jobid
+                    ? `roblox://placeID=${String(row.place_id)}&gameInstanceId=${String(row.server_jobid)}`
+                    : '',
                 last_heartbeat: row ? row.last_heartbeat : null,
             });
         }

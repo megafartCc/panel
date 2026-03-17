@@ -356,6 +356,7 @@ local function sendPing(panelUrl, scriptSlug, hmacKey, options)
         return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat", {
             executor = getExecutorName(),
             jobid = game.JobId or "",
+            placeid = tostring(game.PlaceId or ""),
         })
     end)
 

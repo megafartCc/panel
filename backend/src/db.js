@@ -219,6 +219,33 @@ async function ensureCloudPresetSchema() {
     ]);
 }
 
+async function ensureSessionsPlaceIdColumn() {
+    await ensureDbReady();
+
+    if (isMySql()) {
+        const existing = await dbGet("SHOW COLUMNS FROM sessions LIKE 'place_id'");
+        if (!existing) {
+            await dbRun("ALTER TABLE sessions ADD COLUMN place_id VARCHAR(32) DEFAULT '' AFTER server_jobid");
+        }
+        return;
+    }
+
+    const columns = await dbAll('PRAGMA table_info(sessions)');
+    let found = false;
+    if (Array.isArray(columns)) {
+        for (const column of columns) {
+            if (column && typeof column.name === 'string' && column.name.toLowerCase() === 'place_id') {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        await dbRun("ALTER TABLE sessions ADD COLUMN place_id TEXT DEFAULT ''");
+    }
+}
+
 async function migrate() {
     await ensureDbReady();
 
@@ -244,6 +271,7 @@ async function migrate() {
                 roblox_userid VARCHAR(32) NOT NULL,
                 executor VARCHAR(64) DEFAULT 'Unknown',
                 server_jobid VARCHAR(96) DEFAULT '',
+                place_id VARCHAR(32) DEFAULT '',
                 ip_address VARCHAR(96) DEFAULT '',
                 first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 last_heartbeat DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -314,6 +342,7 @@ async function migrate() {
                 roblox_userid TEXT NOT NULL,
                 executor TEXT DEFAULT 'Unknown',
                 server_jobid TEXT DEFAULT '',
+                place_id TEXT DEFAULT '',
                 ip_address TEXT DEFAULT '',
                 first_seen TEXT DEFAULT (datetime('now')),
                 last_heartbeat TEXT DEFAULT (datetime('now')),
@@ -364,6 +393,7 @@ async function migrate() {
         ]);
     }
 
+    await ensureSessionsPlaceIdColumn();
     await ensureCloudPresetSchema();
 
     const adminUser = process.env.ADMIN_USER || 'admin';

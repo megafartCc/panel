@@ -5,6 +5,103 @@ const { dbAll, dbGet, dbRun, getCutoffDateTime, toDbDateTime } = require('../db'
 
 const router = express.Router();
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(3, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
+const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
+
+function logVerify(route, details) {
+    if (!HMAC_DEBUG) {
+        return;
+    }
+    console.log(`[HMAC:${route}]`, JSON.stringify(details));
+}
+
+function normalizeSignature(signature, expectedHex) {
+    if (typeof signature !== 'string' || !signature) {
+        return null;
+    }
+
+    let value = signature.trim();
+    if (!value) {
+        return null;
+    }
+
+    if (value.startsWith('0x') || value.startsWith('0X')) {
+        value = value.slice(2);
+    }
+
+    if (/^[0-9a-fA-F]+$/.test(value)) {
+        if (expectedHex && value.length !== expectedHex.length) {
+            return null;
+        }
+        return value.toLowerCase();
+    }
+
+    const base64 = value
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+
+    const padding = base64.length % 4;
+    const padded = padding === 0 ? base64 : `${base64}${'='.repeat(4 - padding)}`;
+
+    try {
+        const decoded = Buffer.from(padded, 'base64');
+        if (!decoded || decoded.length === 0) {
+            return null;
+        }
+
+        const decodedAscii = decoded.toString('utf8').trim();
+        if (/^[0-9a-fA-F]+$/.test(decodedAscii)) {
+            if (expectedHex && decodedAscii.length !== expectedHex.length) {
+                return null;
+            }
+            return decodedAscii.toLowerCase();
+        }
+
+        const decodedHex = decoded.toString('hex').toLowerCase();
+        if (expectedHex && decodedHex.length !== expectedHex.length) {
+            return null;
+        }
+        return decodedHex;
+    } catch {
+        return null;
+    }
+}
+
+function validateSignedRequest({ route, script, userid, timestamp, signature, hmacKey }) {
+    const message = `${script}:${userid}:${timestamp}`;
+    const expectedHex = crypto.createHmac('sha256', hmacKey).update(message).digest('hex');
+    const sigHex = normalizeSignature(signature, expectedHex);
+
+    logVerify(route, {
+        script,
+        userid: String(userid),
+        timestamp: String(timestamp),
+        incomingSignature: String(signature),
+        computedSignature: expectedHex,
+        message,
+    });
+
+    if (!sigHex) {
+        logVerify(route, {
+            script,
+            userid: String(userid),
+            reason: 'invalid_signature_format',
+        });
+        return { ok: false, reason: 'format' };
+    }
+
+    if (!crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
+        logVerify(route, {
+            script,
+            userid: String(userid),
+            reason: 'signature_mismatch',
+            normalizedIncomingSignature: sigHex,
+            computedSignature: expectedHex,
+        });
+        return { ok: false, reason: 'mismatch' };
+    }
+
+    return { ok: true };
+}
 
 router.post('/', async (req, res) => {
     try {
@@ -27,20 +124,18 @@ router.post('/', async (req, res) => {
             return res.status(404).json({ error: 'Script not found' });
         }
 
-        const message = `${script}:${userid}:${timestamp}`;
-        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
-
-        let sigHex = signature;
-        if (/[^0-9a-fA-F]/.test(signature)) {
-            try {
-                sigHex = Buffer.from(signature, 'base64').toString('hex');
-            } catch {
+        const signatureCheck = validateSignedRequest({
+            route: 'heartbeat',
+            script,
+            userid,
+            timestamp,
+            signature,
+            hmacKey: scriptRow.hmac_key,
+        });
+        if (!signatureCheck.ok) {
+            if (signatureCheck.reason === 'format') {
                 return res.status(401).json({ error: 'Invalid signature format' });
             }
-        }
-
-        if (sigHex.length !== expectedHex.length ||
-            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
             return res.status(401).json({ error: 'Invalid signature' });
         }
 
@@ -99,20 +194,18 @@ router.post('/peers', async (req, res) => {
             return res.status(404).json({ error: 'Script not found' });
         }
 
-        const message = `${script}:${userid}:${timestamp}`;
-        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
-
-        let sigHex = signature;
-        if (/[^0-9a-fA-F]/.test(signature)) {
-            try {
-                sigHex = Buffer.from(signature, 'base64').toString('hex');
-            } catch {
+        const signatureCheck = validateSignedRequest({
+            route: 'heartbeat_peers',
+            script,
+            userid,
+            timestamp,
+            signature,
+            hmacKey: scriptRow.hmac_key,
+        });
+        if (!signatureCheck.ok) {
+            if (signatureCheck.reason === 'format') {
                 return res.status(401).json({ error: 'Invalid signature format' });
             }
-        }
-
-        if (sigHex.length !== expectedHex.length ||
-            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
             return res.status(401).json({ error: 'Invalid signature' });
         }
 
@@ -200,20 +293,18 @@ router.post('/connections', async (req, res) => {
             return res.status(404).json({ error: 'Script not found' });
         }
 
-        const message = `${script}:${userid}:${timestamp}`;
-        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
-
-        let sigHex = signature;
-        if (/[^0-9a-fA-F]/.test(signature)) {
-            try {
-                sigHex = Buffer.from(signature, 'base64').toString('hex');
-            } catch {
+        const signatureCheck = validateSignedRequest({
+            route: 'heartbeat_connections',
+            script,
+            userid,
+            timestamp,
+            signature,
+            hmacKey: scriptRow.hmac_key,
+        });
+        if (!signatureCheck.ok) {
+            if (signatureCheck.reason === 'format') {
                 return res.status(401).json({ error: 'Invalid signature format' });
             }
-        }
-
-        if (sigHex.length !== expectedHex.length ||
-            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
             return res.status(401).json({ error: 'Invalid signature' });
         }
 
@@ -293,20 +384,18 @@ router.post('/servers', async (req, res) => {
             return res.status(404).json({ error: 'Script not found' });
         }
 
-        const message = `${script}:${userid}:${timestamp}`;
-        const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
-
-        let sigHex = signature;
-        if (/[^0-9a-fA-F]/.test(signature)) {
-            try {
-                sigHex = Buffer.from(signature, 'base64').toString('hex');
-            } catch {
+        const signatureCheck = validateSignedRequest({
+            route: 'heartbeat_servers',
+            script,
+            userid,
+            timestamp,
+            signature,
+            hmacKey: scriptRow.hmac_key,
+        });
+        if (!signatureCheck.ok) {
+            if (signatureCheck.reason === 'format') {
                 return res.status(401).json({ error: 'Invalid signature format' });
             }
-        }
-
-        if (sigHex.length !== expectedHex.length ||
-            !crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
             return res.status(401).json({ error: 'Invalid signature' });
         }
 

@@ -730,6 +730,42 @@ function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
 end
 PanelSDK.ChatFeed = PanelSDK.chatFeed
 
+function PanelSDK.chatTyping(panelUrl, scriptSlug, hmacKey, options)
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
+        return false, { error = "missing panel config" }
+    end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+
+    local isTyping = options.is_typing == true or options.isTyping == true or options.typing == true
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/typing", {
+        room = tostring(options.room or "global"),
+        is_typing = isTyping,
+        scope = resolveScopeOption(options),
+        include_self = options.include_self == true or options.includeSelf == true,
+    })
+end
+PanelSDK.ChatTyping = PanelSDK.chatTyping
+
+function PanelSDK.chatTypingStatus(panelUrl, scriptSlug, hmacKey, options)
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
+        return false, { error = "missing panel config" }
+    end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/typing_status", {
+        room = tostring(options.room or "global"),
+        scope = resolveScopeOption(options),
+        include_self = options.include_self == true or options.includeSelf == true,
+    })
+end
+PanelSDK.ChatTypingStatus = PanelSDK.chatTypingStatus
+
 PanelSDK.cloud = {
     save = function(...)
         return PanelSDK.cloudSave(...)
@@ -754,6 +790,12 @@ PanelSDK.chat = {
     end,
     feed = function(...)
         return PanelSDK.chatFeed(...)
+    end,
+    typing = function(...)
+        return PanelSDK.chatTyping(...)
+    end,
+    typingStatus = function(...)
+        return PanelSDK.chatTypingStatus(...)
     end,
 }
 

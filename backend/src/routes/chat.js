@@ -9,12 +9,15 @@ const CHAT_MAX_MESSAGE_LENGTH = Math.max(16, Number(process.env.CHAT_MAX_MESSAGE
 const CHAT_DEFAULT_LIMIT = Math.max(5, Number(process.env.CHAT_DEFAULT_LIMIT) || 60);
 const CHAT_MAX_LIMIT = Math.max(CHAT_DEFAULT_LIMIT, Number(process.env.CHAT_MAX_LIMIT) || 150);
 const CHAT_DEFAULT_ROOM = 'global';
+const CHAT_TYPING_TTL_SECONDS = Math.max(3, Number(process.env.CHAT_TYPING_TTL_SECONDS) || 7);
 const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
 const GLOBAL_UILIB_KEYS = [
     process.env.UILIB_CHAT_KEY,
     process.env.PANEL_CUSTOM_KEY,
     process.env.PANEL_KEY,
 ].filter((v) => typeof v === 'string' && v.trim() !== '');
+
+const typingStateByRoom = new Map();
 
 async function getScriptRow(script) {
     return dbGet('SELECT id, name, slug, hmac_key FROM scripts WHERE slug = ?', [script]);
@@ -182,6 +185,102 @@ function useGlobalScope(payload) {
         || isTruthyScope(payload?.global);
 }
 
+function buildTypingRoomKey(scriptRowId, room, globalScope) {
+    if (globalScope) {
+        return `global:${room}`;
+    }
+    return `script:${String(scriptRowId)}:${room}`;
+}
+
+function normalizeTypingFlag(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return false;
+    }
+    const raw = payload.is_typing ?? payload.isTyping ?? payload.typing;
+    if (raw === true || raw === 1) {
+        return true;
+    }
+    const text = String(raw || '').trim().toLowerCase();
+    return text === '1' || text === 'true' || text === 'yes' || text === 'typing';
+}
+
+function pruneTypingEntries(nowMs = Date.now()) {
+    for (const [roomKey, roomMap] of typingStateByRoom.entries()) {
+        if (!(roomMap instanceof Map)) {
+            typingStateByRoom.delete(roomKey);
+            continue;
+        }
+        for (const [userId, entry] of roomMap.entries()) {
+            if (!entry || typeof entry !== 'object' || Number(entry.expiresAt || 0) <= nowMs) {
+                roomMap.delete(userId);
+            }
+        }
+        if (roomMap.size === 0) {
+            typingStateByRoom.delete(roomKey);
+        }
+    }
+}
+
+function updateTypingEntry({ roomKey, user, userid, isTyping }) {
+    pruneTypingEntries();
+
+    if (!roomKey || !userid) {
+        return;
+    }
+
+    const userIdText = String(userid);
+    let roomMap = typingStateByRoom.get(roomKey);
+    if (!(roomMap instanceof Map)) {
+        roomMap = new Map();
+        typingStateByRoom.set(roomKey, roomMap);
+    }
+
+    if (!isTyping) {
+        roomMap.delete(userIdText);
+        if (roomMap.size === 0) {
+            typingStateByRoom.delete(roomKey);
+        }
+        return;
+    }
+
+    const nowMs = Date.now();
+    roomMap.set(userIdText, {
+        user: String(user || ''),
+        userid: userIdText,
+        updatedAt: nowMs,
+        expiresAt: nowMs + (CHAT_TYPING_TTL_SECONDS * 1000),
+    });
+}
+
+function getTypingUsers(roomKey, requesterUserId, includeSelf = false) {
+    pruneTypingEntries();
+
+    const roomMap = typingStateByRoom.get(roomKey);
+    if (!(roomMap instanceof Map) || roomMap.size === 0) {
+        return [];
+    }
+
+    const requester = String(requesterUserId || '');
+    const users = [];
+    for (const entry of roomMap.values()) {
+        if (!entry || typeof entry !== 'object') {
+            continue;
+        }
+        const entryUserId = String(entry.userid || '');
+        if (!includeSelf && requester && entryUserId === requester) {
+            continue;
+        }
+        users.push({
+            user: String(entry.user || ''),
+            userid: entryUserId,
+            updated_at: Number(entry.updatedAt || 0),
+        });
+    }
+
+    users.sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+    return users;
+}
+
 function normalizeMessage(value) {
     if (typeof value !== 'string' && typeof value !== 'number') {
         return null;
@@ -334,6 +433,13 @@ router.post('/send', async (req, res) => {
             ]
         );
 
+        updateTypingEntry({
+            roomKey: buildTypingRoomKey(verification.scriptRow.id, room, globalScope),
+            user: username,
+            userid,
+            isTyping: false,
+        });
+
         let insertedId = Number(insertResult.insertId || 0);
         if (!insertedId) {
             const fallbackRow = await dbGet(
@@ -440,6 +546,8 @@ router.post('/feed', async (req, res) => {
 
         const messages = rows.map(mapMessageRow);
         const lastId = messages.length > 0 ? Number(messages[messages.length - 1].id || afterId) : afterId;
+        const typingRoomKey = buildTypingRoomKey(verification.scriptRow.id, room, globalScope);
+        const typingUsers = getTypingUsers(typingRoomKey, String(req.body.userid || ''), false);
 
         return res.json({
             ok: true,
@@ -448,9 +556,76 @@ router.post('/feed', async (req, res) => {
             count: messages.length,
             last_id: lastId,
             messages,
+            typing_users: typingUsers,
         });
     } catch (err) {
         console.error('[Chat] feed error:', err.message);
+        return res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+router.post('/typing', async (req, res) => {
+    try {
+        const verification = await verifySignedScriptPayload(req.body);
+        if (!verification.ok) {
+            return res.status(verification.status).json({ error: verification.error });
+        }
+
+        const room = normalizeRoom(req.body.room);
+        const globalScope = useGlobalScope(req.body);
+        const username = String(req.body.user || '').trim();
+        const userid = String(req.body.userid || '').trim();
+        const isTyping = normalizeTypingFlag(req.body);
+        const includeSelf = isTruthyScope(req.body.include_self) || isTruthyScope(req.body.includeSelf);
+        const roomKey = buildTypingRoomKey(verification.scriptRow.id, room, globalScope);
+
+        if (!username || !userid) {
+            return res.status(400).json({ error: 'Invalid typing payload' });
+        }
+
+        updateTypingEntry({
+            roomKey,
+            user: username,
+            userid,
+            isTyping,
+        });
+
+        const typingUsers = getTypingUsers(roomKey, userid, includeSelf);
+        return res.json({
+            ok: true,
+            room,
+            scope: globalScope ? 'global' : 'script',
+            is_typing: isTyping,
+            typing_users: typingUsers,
+        });
+    } catch (err) {
+        console.error('[Chat] typing error:', err.message);
+        return res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+router.post('/typing_status', async (req, res) => {
+    try {
+        const verification = await verifySignedScriptPayload(req.body);
+        if (!verification.ok) {
+            return res.status(verification.status).json({ error: verification.error });
+        }
+
+        const room = normalizeRoom(req.body.room);
+        const globalScope = useGlobalScope(req.body);
+        const userid = String(req.body.userid || '').trim();
+        const includeSelf = isTruthyScope(req.body.include_self) || isTruthyScope(req.body.includeSelf);
+        const roomKey = buildTypingRoomKey(verification.scriptRow.id, room, globalScope);
+
+        const typingUsers = getTypingUsers(roomKey, userid, includeSelf);
+        return res.json({
+            ok: true,
+            room,
+            scope: globalScope ? 'global' : 'script',
+            typing_users: typingUsers,
+        });
+    } catch (err) {
+        console.error('[Chat] typing_status error:', err.message);
         return res.status(500).json({ error: 'Internal error' });
     }
 });

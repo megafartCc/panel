@@ -122,6 +122,16 @@ async function verifySignedScriptPayload(payload) {
         hasScriptRow: true,
     });
 
+    logVerify('chat', {
+        script,
+        userid: String(userid),
+        timestamp: String(timestamp),
+        incomingSignature: String(signature),
+        computedSignature: expectedHex,
+        message,
+        hasScriptRow: true,
+    });
+
     if (!sigHex) {
         logVerify('chat', { script, userid: String(userid), reason: 'invalid_signature_format' });
         return { ok: false, status: 401, error: 'Invalid signature format' };

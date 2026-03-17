@@ -8,7 +8,9 @@ const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(3, Number(process.env.SESSION_TI
 
 router.post('/', async (req, res) => {
     try {
-        const { script, user, userid, executor, jobid, placeid, timestamp, signature } = req.body;
+        const body = req.body || {};
+        const script = String(body.script || body.slug || body.script_slug || '').trim();
+        const { user, userid, executor, jobid, placeid, timestamp, signature } = body;
 
         if (!script || !user || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -78,7 +80,9 @@ router.post('/', async (req, res) => {
 
 router.post('/peers', async (req, res) => {
     try {
-        const { script, userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = req.body || {};
+        const body = req.body || {};
+        const script = String(body.script || body.slug || body.script_slug || '').trim();
+        const { userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = body;
 
         if (!script || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -177,7 +181,9 @@ router.post('/peers', async (req, res) => {
 
 router.post('/connections', async (req, res) => {
     try {
-        const { script, userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = req.body || {};
+        const body = req.body || {};
+        const script = String(body.script || body.slug || body.script_slug || '').trim();
+        const { userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = body;
 
         if (!script || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -268,7 +274,9 @@ router.post('/connections', async (req, res) => {
 
 router.post('/servers', async (req, res) => {
     try {
-        const { script, userid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = req.body || {};
+        const body = req.body || {};
+        const script = String(body.script || body.slug || body.script_slug || '').trim();
+        const { userid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = body;
 
         if (!script || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });

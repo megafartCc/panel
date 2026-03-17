@@ -79,7 +79,8 @@ async function getScriptRow(script) {
 }
 
 async function verifySignedScriptPayload(payload) {
-    const { script, userid, timestamp, signature } = payload || {};
+    const script = String(payload?.script || payload?.slug || payload?.script_slug || '').trim();
+    const { userid, timestamp, signature } = payload || {};
 
     if (!script || !userid || !timestamp || !signature) {
         return { ok: false, status: 400, error: 'Missing required fields' };

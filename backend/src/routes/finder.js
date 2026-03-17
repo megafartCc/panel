@@ -34,7 +34,8 @@ function normalizeSignature(signature, expectedHex) {
 }
 
 async function verifySignedScriptPayload(payload) {
-    const { script, userid, timestamp, signature } = payload || {};
+    const script = String(payload?.script || payload?.slug || payload?.script_slug || '').trim();
+    const { userid, timestamp, signature } = payload || {};
 
     if (!script || !userid || !timestamp || !signature) {
         return { ok: false, status: 400, error: 'Missing required fields' };
@@ -172,7 +173,6 @@ router.post('/', async (req, res) => {
         }
 
         const {
-            script,
             user,
             userid,
             executor,
@@ -268,7 +268,7 @@ router.post('/', async (req, res) => {
 
         res.json({
             ok: true,
-            script,
+            script: verification.scriptRow.slug,
             inserted,
             ignored: normalizedBrainrots.length - inserted,
             ttlSeconds: FINDER_TTL_SECONDS,

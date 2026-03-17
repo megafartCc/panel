@@ -170,25 +170,82 @@ k = {
 
 local pureHmacHex = buildPureHmac()
 
+local function normalizeDigestHex(value)
+    if value == nil then
+        return nil
+    end
+
+    local text = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
+    if text == "" then
+        return nil
+    end
+
+    if text:sub(1, 2) == "0x" or text:sub(1, 2) == "0X" then
+        text = text:sub(3)
+    end
+
+    if string.match(text, "^[0-9a-fA-F]+$") then
+        return string.lower(text)
+    end
+
+    local base64 = text:gsub("-", "+"):gsub("_", "/")
+    local missing = #base64 % 4
+    if missing > 0 then
+        base64 = base64 .. string.rep("=", 4 - missing)
+    end
+
+    local okDecode, decoded = pcall(function()
+        return HttpService:Base64Decode(base64)
+    end)
+    if not okDecode or type(decoded) ~= "string" or decoded == "" then
+        return nil
+    end
+
+    local asHex = string.match(decoded, "^%x+$")
+    if asHex and #asHex > 0 then
+        return string.lower(asHex)
+    end
+
+    return (decoded:gsub(".", function(ch)
+        return string.format("%02x", string.byte(ch))
+    end))
+end
+
 -- HMAC helper (multi-executor compat)
 local function computeHmac(key, message)
+    if pureHmacHex then
+        local ok, r = pcall(pureHmacHex, key, message)
+        if ok and r then
+            local normalized = normalizeDigestHex(r)
+            if normalized then return normalized end
+        end
+    end
+
     if syn and syn.crypt and syn.crypt.hmac then
         local ok, r = pcall(syn.crypt.hmac, "sha256", message, key)
-        if ok and r then return r end
+        if ok and r then
+            local normalized = normalizeDigestHex(r)
+            if normalized then return normalized end
+        end
     end
     if crypt and crypt.hmac then
         local ok, r = pcall(crypt.hmac, key, message, "sha256")
-        if ok and r then return r end
+        if ok and r then
+            local normalized = normalizeDigestHex(r)
+            if normalized then return normalized end
+        end
         ok, r = pcall(crypt.hmac, message, key, "sha256")
-        if ok and r then return r end
+        if ok and r then
+            local normalized = normalizeDigestHex(r)
+            if normalized then return normalized end
+        end
     end
     if syn and syn.crypt and syn.crypt.custom and syn.crypt.custom.hash then
         local ok, r = pcall(syn.crypt.custom.hash, "sha256", message, key)
-        if ok and r then return r end
-    end
-    if pureHmacHex then
-        local ok, r = pcall(pureHmacHex, key, message)
-        if ok and r then return r end
+        if ok and r then
+            local normalized = normalizeDigestHex(r)
+            if normalized then return normalized end
+        end
     end
     return nil
 end
@@ -317,10 +374,13 @@ local function postJson(panelUrl, path, payload)
     }
 end
 
+local resolveSigningKey
+
 local function buildSignedPayload(scriptSlug, hmacKey, extra)
+    local signingKey = resolveSigningKey(hmacKey, extra)
     local timestamp = tostring(math.floor(os.time()))
     local userid = tostring(lp.UserId)
-    local signature = computeHmac(hmacKey, scriptSlug .. ":" .. userid .. ":" .. timestamp)
+    local signature = computeHmac(signingKey, scriptSlug .. ":" .. userid .. ":" .. timestamp)
     if not signature then
         return nil
     end
@@ -354,7 +414,10 @@ local runtimeConfig = {
     panelUrl = nil,
     scriptSlug = nil,
     hmacKey = nil,
+    customKey = nil,
 }
+
+local lastAutoHeartbeatAt = 0
 
 local function publishRuntimeConfig()
     if type(getgenv) ~= "function" then
@@ -374,6 +437,8 @@ local function publishRuntimeConfig()
     envTable.PanelSlug = runtimeConfig.scriptSlug
     envTable.PANEL_KEY = runtimeConfig.hmacKey
     envTable.PanelKey = runtimeConfig.hmacKey
+    envTable.PANEL_CUSTOM_KEY = runtimeConfig.customKey
+    envTable.PanelCustomKey = runtimeConfig.customKey
 end
 
 local function rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
@@ -401,6 +466,30 @@ local function resolveConfig(panelUrl, scriptSlug, hmacKey, options)
     hmacKey = tostring(hmacKey or "")
 
     return panelUrl, scriptSlug, hmacKey, options
+end
+
+resolveSigningKey = function(defaultKey, options)
+    options = type(options) == "table" and options or {}
+    local fromOptions = options.customKey or options.custom_key or options.panelKey or options.key
+    if type(fromOptions) == "string" and fromOptions ~= "" then
+        return fromOptions
+    end
+
+    if type(runtimeConfig.customKey) == "string" and runtimeConfig.customKey ~= "" then
+        return runtimeConfig.customKey
+    end
+
+    if type(getgenv) == "function" then
+        local okEnv, envTable = pcall(getgenv)
+        if okEnv and type(envTable) == "table" then
+            local envKey = envTable.PANEL_CUSTOM_KEY or envTable.PanelCustomKey or envTable.UILIB_CHAT_KEY
+            if type(envKey) == "string" and envKey ~= "" then
+                return envKey
+            end
+        end
+    end
+
+    return defaultKey
 end
 
 local function sendPing(panelUrl, scriptSlug, hmacKey, options)
@@ -438,6 +527,30 @@ local function sendPing(panelUrl, scriptSlug, hmacKey, options)
     end
 
     return success, response
+end
+
+local function maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+    local now = os.clock()
+    if (now - lastAutoHeartbeatAt) < 8 then
+        return
+    end
+
+    lastAutoHeartbeatAt = now
+    sendPing(panelUrl, scriptSlug, hmacKey, { debug = false })
+end
+
+function PanelSDK.setCustomKey(customKey)
+    runtimeConfig.customKey = tostring(customKey or "")
+    if runtimeConfig.customKey == "" then
+        runtimeConfig.customKey = nil
+    end
+    publishRuntimeConfig()
+    return runtimeConfig.customKey ~= nil
+end
+
+function PanelSDK.clearCustomKey()
+    runtimeConfig.customKey = nil
+    publishRuntimeConfig()
 end
 
 function PanelSDK.cloudSave(panelUrl, scriptSlug, hmacKey, presetName, data)
@@ -493,6 +606,9 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/peers", {
         jobid = tostring(options.jobid or game.JobId or ""),
         include_self = options.includeSelf == true or options.include_self == true,
@@ -506,6 +622,9 @@ function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
     if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/connections", {
         jobid = tostring(options.jobid or game.JobId or ""),
@@ -521,6 +640,9 @@ function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/servers", {
         include_self = options.includeSelf == true or options.include_self == true,
     })
@@ -533,6 +655,9 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
     if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     local text = tostring(messageText or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then
@@ -551,6 +676,9 @@ function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
     if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/feed", {
         room = tostring(options.room or "global"),

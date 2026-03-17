@@ -448,6 +448,40 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
     })
 end
 
+function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+
+    local text = tostring(messageText or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if text == "" then
+        return false, { error = "empty_message" }
+    end
+
+    options = type(options) == "table" and options or {}
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/send", {
+        room = tostring(options.room or "global"),
+        message = text,
+    })
+end
+
+function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+
+    options = type(options) == "table" and options or {}
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/feed", {
+        room = tostring(options.room or "global"),
+        after_id = tonumber(options.after_id or options.afterId or 0) or 0,
+        limit = tonumber(options.limit or 60) or 60,
+    })
+end
+
 PanelSDK.cloud = {
     save = function(...)
         return PanelSDK.cloudSave(...)
@@ -466,6 +500,15 @@ PanelSDK.cloud = {
     end,
 }
 
+PanelSDK.chat = {
+    send = function(...)
+        return PanelSDK.chatSend(...)
+    end,
+    feed = function(...)
+        return PanelSDK.chatFeed(...)
+    end,
+}
+
 function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
     if not panelUrl or not scriptSlug or not hmacKey then
         return false, "missing panel config"
@@ -473,6 +516,20 @@ function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
 
     panelUrl = tostring(panelUrl):gsub("/$", "")
     options = type(options) == "table" and options or {}
+
+    local envTable = _G
+    if type(getgenv) == "function" then
+        local okEnv, resolvedEnv = pcall(getgenv)
+        if okEnv and type(resolvedEnv) == "table" then
+            envTable = resolvedEnv
+        end
+    end
+    if type(envTable) == "table" then
+        envTable.PanelSDK = PanelSDK
+        envTable.PANEL_URL = panelUrl
+        envTable.PANEL_SLUG = tostring(scriptSlug)
+        envTable.PANEL_KEY = tostring(hmacKey)
+    end
 
     local initialDelay = tonumber(options.initialDelay or options.delay or 2) or 2
     local interval = tonumber(options.interval or options.intervalSeconds or 10) or 10

@@ -279,6 +279,18 @@ async function migrate() {
                 KEY idx_finder_reports_server_time (server_jobid, discovered_at),
                 CONSTRAINT fk_finder_script FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+            `CREATE TABLE IF NOT EXISTS chat_messages (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                script_id CHAR(36) NOT NULL,
+                room VARCHAR(32) NOT NULL DEFAULT 'global',
+                roblox_user VARCHAR(64) NOT NULL,
+                roblox_userid VARCHAR(32) NOT NULL,
+                message_content VARCHAR(512) NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                KEY idx_chat_script_room_id (script_id, room, id),
+                KEY idx_chat_script_room_time (script_id, room, created_at),
+                CONSTRAINT fk_chat_script FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         ]);
     } else {
         await runStatements([
@@ -330,6 +342,16 @@ async function migrate() {
                 FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
                 UNIQUE(script_id, server_jobid, brainrot_key)
             )`,
+            `CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                script_id TEXT NOT NULL,
+                room TEXT NOT NULL DEFAULT 'global',
+                roblox_user TEXT NOT NULL,
+                roblox_userid TEXT NOT NULL,
+                message_content TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+            )`,
             'CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active)',
             'CREATE INDEX IF NOT EXISTS idx_sessions_script ON sessions(script_id)',
             'CREATE INDEX IF NOT EXISTS idx_sessions_last_hb ON sessions(last_heartbeat)',
@@ -337,6 +359,8 @@ async function migrate() {
             'CREATE INDEX IF NOT EXISTS idx_heartbeat_log_session ON heartbeat_log(session_id)',
             'CREATE INDEX IF NOT EXISTS idx_finder_reports_script_time ON finder_reports(script_id, discovered_at)',
             'CREATE INDEX IF NOT EXISTS idx_finder_reports_server_time ON finder_reports(server_jobid, discovered_at)',
+            'CREATE INDEX IF NOT EXISTS idx_chat_messages_script_room_id ON chat_messages(script_id, room, id)',
+            'CREATE INDEX IF NOT EXISTS idx_chat_messages_script_room_time ON chat_messages(script_id, room, created_at)',
         ]);
     }
 
@@ -392,6 +416,12 @@ async function migrate() {
             slug: 'jujutsu-shenanigans',
             envName: 'JUJUTSU_SHENANIGANS_HMAC_KEY',
             envKey: process.env.JUJUTSU_SHENANIGANS_HMAC_KEY || process.env.PANEL_JUJUTSU_SHENANIGANS_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
+        },
+        {
+            name: 'Blox Fruits',
+            slug: 'bloxfruits',
+            envName: 'BLOXFRUITS_HMAC_KEY',
+            envKey: process.env.BLOXFRUITS_HMAC_KEY || process.env.PANEL_BLOXFRUITS_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
         },
     ];
 

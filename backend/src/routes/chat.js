@@ -10,6 +10,11 @@ const CHAT_DEFAULT_LIMIT = Math.max(5, Number(process.env.CHAT_DEFAULT_LIMIT) ||
 const CHAT_MAX_LIMIT = Math.max(CHAT_DEFAULT_LIMIT, Number(process.env.CHAT_MAX_LIMIT) || 150);
 const CHAT_DEFAULT_ROOM = 'global';
 const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
+const GLOBAL_UILIB_KEYS = [
+    process.env.UILIB_CHAT_KEY,
+    process.env.PANEL_CUSTOM_KEY,
+    process.env.PANEL_KEY,
+].filter((v) => typeof v === 'string' && v.trim() !== '');
 
 async function getScriptRow(script) {
     return dbGet('SELECT id, name, slug, hmac_key FROM scripts WHERE slug = ?', [script]);
@@ -94,8 +99,28 @@ async function verifySignedScriptPayload(payload) {
     }
 
     const message = `${script}:${userid}:${timestamp}`;
-    const expectedHex = crypto.createHmac('sha256', scriptRow.hmac_key).update(message).digest('hex');
-    const sigHex = normalizeSignature(signature, expectedHex);
+    const candidateKeys = [scriptRow.hmac_key, ...GLOBAL_UILIB_KEYS]
+        .filter((v) => typeof v === 'string' && v.trim() !== '');
+    const uniqueKeys = Array.from(new Set(candidateKeys));
+    if (uniqueKeys.length === 0) {
+        return { ok: false, status: 500, error: 'No signing key configured' };
+    }
+    const expectedByKey = uniqueKeys.map((keyValue) => ({
+        source: keyValue === scriptRow.hmac_key ? 'script' : 'global',
+        expectedHex: crypto.createHmac('sha256', keyValue).update(message).digest('hex'),
+    }));
+    const sigHex = normalizeSignature(signature, expectedByKey[0].expectedHex);
+
+    logVerify('chat', {
+        script,
+        userid: String(userid),
+        timestamp: String(timestamp),
+        incomingSignature: String(signature),
+        computedSignature: expectedByKey[0].expectedHex,
+        candidateCount: expectedByKey.length,
+        message,
+        hasScriptRow: true,
+    });
 
     logVerify('chat', {
         script,
@@ -112,16 +137,31 @@ async function verifySignedScriptPayload(payload) {
         return { ok: false, status: 401, error: 'Invalid signature format' };
     }
 
-    if (!crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
+    let matched = null;
+    for (const candidate of expectedByKey) {
+        if (crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(candidate.expectedHex, 'hex'))) {
+            matched = candidate;
+            break;
+        }
+    }
+
+    if (!matched) {
         logVerify('chat', {
             script,
             userid: String(userid),
             reason: 'signature_mismatch',
             normalizedIncomingSignature: sigHex,
-            computedSignature: expectedHex,
+            computedSignature: expectedByKey[0].expectedHex,
         });
         return { ok: false, status: 401, error: 'Invalid signature' };
     }
+
+    logVerify('chat', {
+        script,
+        userid: String(userid),
+        reason: 'signature_match',
+        keySource: matched.source,
+    });
 
     return { ok: true, scriptRow };
 }

@@ -6,6 +6,11 @@ const { dbAll, dbGet, dbRun, getCutoffDateTime, toDbDateTime } = require('../db'
 const router = express.Router();
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(3, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
 const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
+const GLOBAL_UILIB_KEYS = [
+    process.env.UILIB_CHAT_KEY,
+    process.env.PANEL_CUSTOM_KEY,
+    process.env.PANEL_KEY,
+].filter((v) => typeof v === 'string' && v.trim() !== '');
 
 function logVerify(route, details) {
     if (!HMAC_DEBUG) {
@@ -68,15 +73,27 @@ function normalizeSignature(signature, expectedHex) {
 
 function validateSignedRequest({ route, script, userid, timestamp, signature, hmacKey }) {
     const message = `${script}:${userid}:${timestamp}`;
-    const expectedHex = crypto.createHmac('sha256', hmacKey).update(message).digest('hex');
-    const sigHex = normalizeSignature(signature, expectedHex);
+    const candidateKeys = [hmacKey, ...GLOBAL_UILIB_KEYS]
+        .filter((v) => typeof v === 'string' && v.trim() !== '');
+    const uniqueKeys = Array.from(new Set(candidateKeys));
+
+    if (uniqueKeys.length === 0) {
+        return { ok: false, reason: 'missing_key' };
+    }
+
+    const expectedByKey = uniqueKeys.map((keyValue) => ({
+        source: keyValue === hmacKey ? 'script' : 'global',
+        expectedHex: crypto.createHmac('sha256', keyValue).update(message).digest('hex'),
+    }));
+    const sigHex = normalizeSignature(signature, expectedByKey[0].expectedHex);
 
     logVerify(route, {
         script,
         userid: String(userid),
         timestamp: String(timestamp),
         incomingSignature: String(signature),
-        computedSignature: expectedHex,
+        computedSignature: expectedByKey[0].expectedHex,
+        candidateCount: expectedByKey.length,
         message,
     });
 
@@ -89,16 +106,31 @@ function validateSignedRequest({ route, script, userid, timestamp, signature, hm
         return { ok: false, reason: 'format' };
     }
 
-    if (!crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(expectedHex, 'hex'))) {
+    let matched = null;
+    for (const candidate of expectedByKey) {
+        if (crypto.timingSafeEqual(Buffer.from(sigHex, 'hex'), Buffer.from(candidate.expectedHex, 'hex'))) {
+            matched = candidate;
+            break;
+        }
+    }
+
+    if (!matched) {
         logVerify(route, {
             script,
             userid: String(userid),
             reason: 'signature_mismatch',
             normalizedIncomingSignature: sigHex,
-            computedSignature: expectedHex,
+            computedSignature: expectedByKey[0].expectedHex,
         });
         return { ok: false, reason: 'mismatch' };
     }
+
+    logVerify(route, {
+        script,
+        userid: String(userid),
+        reason: 'signature_match',
+        keySource: matched.source,
+    });
 
     return { ok: true };
 }

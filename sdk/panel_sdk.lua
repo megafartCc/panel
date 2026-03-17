@@ -448,6 +448,7 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
         include_self = options.includeSelf == true or options.include_self == true,
     })
 end
+PanelSDK.SharedUsers = PanelSDK.sharedUsers
 
 function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
     if not panelUrl or not scriptSlug or not hmacKey then
@@ -462,6 +463,7 @@ function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
         include_self = options.includeSelf ~= false and options.include_self ~= false,
     })
 end
+PanelSDK.ConnectionStats = PanelSDK.connectionStats
 
 function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
     if not panelUrl or not scriptSlug or not hmacKey then
@@ -475,6 +477,7 @@ function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
         include_self = options.includeSelf == true or options.include_self == true,
     })
 end
+PanelSDK.SharedServers = PanelSDK.sharedServers
 
 function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
     if not panelUrl or not scriptSlug or not hmacKey then
@@ -494,6 +497,7 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
         message = text,
     })
 end
+PanelSDK.ChatSend = PanelSDK.chatSend
 
 function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
     if not panelUrl or not scriptSlug or not hmacKey then
@@ -509,6 +513,7 @@ function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
         limit = tonumber(options.limit or 60) or 60,
     })
 end
+PanelSDK.ChatFeed = PanelSDK.chatFeed
 
 PanelSDK.cloud = {
     save = function(...)
@@ -544,20 +549,6 @@ function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
 
     panelUrl = tostring(panelUrl):gsub("/$", "")
     options = type(options) == "table" and options or {}
-
-    local envTable = _G
-    if type(getgenv) == "function" then
-        local okEnv, resolvedEnv = pcall(getgenv)
-        if okEnv and type(resolvedEnv) == "table" then
-            envTable = resolvedEnv
-        end
-    end
-    if type(envTable) == "table" then
-        envTable.PanelSDK = PanelSDK
-        envTable.PANEL_URL = panelUrl
-        envTable.PANEL_SLUG = tostring(scriptSlug)
-        envTable.PANEL_KEY = tostring(hmacKey)
-    end
 
     local initialDelay = tonumber(options.initialDelay or options.delay or 2) or 2
     local interval = tonumber(options.interval or options.intervalSeconds or 10) or 10

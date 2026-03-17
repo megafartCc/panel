@@ -434,6 +434,20 @@ function PanelSDK.cloudQuota(panelUrl, scriptSlug, hmacKey)
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/cloud/quota", {})
 end
 
+function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
+    if not panelUrl or not scriptSlug or not hmacKey then
+        return false, { error = "missing panel config" }
+    end
+
+    options = type(options) == "table" and options or {}
+    panelUrl = tostring(panelUrl):gsub("/$", "")
+
+    return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/peers", {
+        jobid = tostring(options.jobid or game.JobId or ""),
+        include_self = options.includeSelf == true or options.include_self == true,
+    })
+end
+
 PanelSDK.cloud = {
     save = function(...)
         return PanelSDK.cloudSave(...)

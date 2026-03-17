@@ -350,13 +350,65 @@ local function sendSignedRequest(panelUrl, scriptSlug, hmacKey, path, extra)
     return postJson(panelUrl, path, payload)
 end
 
+local runtimeConfig = {
+    panelUrl = nil,
+    scriptSlug = nil,
+    hmacKey = nil,
+}
+
+local function publishRuntimeConfig()
+    if type(getgenv) ~= "function" then
+        return
+    end
+
+    local okEnv, envTable = pcall(getgenv)
+    if not okEnv or type(envTable) ~= "table" then
+        return
+    end
+
+    envTable.PanelSDK = PanelSDK
+    envTable.panelSdk = PanelSDK
+    envTable.PANEL_URL = runtimeConfig.panelUrl
+    envTable.PanelUrl = runtimeConfig.panelUrl
+    envTable.PANEL_SLUG = runtimeConfig.scriptSlug
+    envTable.PanelSlug = runtimeConfig.scriptSlug
+    envTable.PANEL_KEY = runtimeConfig.hmacKey
+    envTable.PanelKey = runtimeConfig.hmacKey
+end
+
+local function rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    runtimeConfig.panelUrl = tostring(panelUrl or ""):gsub("/$", "")
+    runtimeConfig.scriptSlug = tostring(scriptSlug or "")
+    runtimeConfig.hmacKey = tostring(hmacKey or "")
+    publishRuntimeConfig()
+end
+
+local function resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if type(panelUrl) == "table" and scriptSlug == nil and hmacKey == nil then
+        options = panelUrl
+        panelUrl = nil
+    end
+
+    if panelUrl == nil and scriptSlug == nil and hmacKey == nil then
+        panelUrl = runtimeConfig.panelUrl
+        scriptSlug = runtimeConfig.scriptSlug
+        hmacKey = runtimeConfig.hmacKey
+    end
+
+    options = type(options) == "table" and options or {}
+    panelUrl = tostring(panelUrl or ""):gsub("/$", "")
+    scriptSlug = tostring(scriptSlug or "")
+    hmacKey = tostring(hmacKey or "")
+
+    return panelUrl, scriptSlug, hmacKey, options
+end
+
 local function sendPing(panelUrl, scriptSlug, hmacKey, options)
     local debugMode = type(options) == "table" and options.debug == true
     local okCall, success, response = pcall(function()
         return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat", {
             executor = getExecutorName(),
             jobid = game.JobId or "",
-            placeid = tostring(game.PlaceId or ""),
         })
     end)
 
@@ -436,12 +488,10 @@ function PanelSDK.cloudQuota(panelUrl, scriptSlug, hmacKey)
 end
 
 function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
-    if not panelUrl or not scriptSlug or not hmacKey then
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
-
-    options = type(options) == "table" and options or {}
-    panelUrl = tostring(panelUrl):gsub("/$", "")
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/peers", {
         jobid = tostring(options.jobid or game.JobId or ""),
@@ -449,14 +499,13 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
     })
 end
 PanelSDK.SharedUsers = PanelSDK.sharedUsers
+PanelSDK.Peers = PanelSDK.sharedUsers
 
 function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
-    if not panelUrl or not scriptSlug or not hmacKey then
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
-
-    options = type(options) == "table" and options or {}
-    panelUrl = tostring(panelUrl):gsub("/$", "")
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/connections", {
         jobid = tostring(options.jobid or game.JobId or ""),
@@ -464,23 +513,24 @@ function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
     })
 end
 PanelSDK.ConnectionStats = PanelSDK.connectionStats
+PanelSDK.Connections = PanelSDK.connectionStats
 
 function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
-    if not panelUrl or not scriptSlug or not hmacKey then
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
-
-    options = type(options) == "table" and options or {}
-    panelUrl = tostring(panelUrl):gsub("/$", "")
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/servers", {
         include_self = options.includeSelf == true or options.include_self == true,
     })
 end
 PanelSDK.SharedServers = PanelSDK.sharedServers
+PanelSDK.Servers = PanelSDK.sharedServers
 
 function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
-    if not panelUrl or not scriptSlug or not hmacKey then
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
 
@@ -488,9 +538,6 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
     if text == "" then
         return false, { error = "empty_message" }
     end
-
-    options = type(options) == "table" and options or {}
-    panelUrl = tostring(panelUrl):gsub("/$", "")
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/send", {
         room = tostring(options.room or "global"),
@@ -500,12 +547,10 @@ end
 PanelSDK.ChatSend = PanelSDK.chatSend
 
 function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
-    if not panelUrl or not scriptSlug or not hmacKey then
+    panelUrl, scriptSlug, hmacKey, options = resolveConfig(panelUrl, scriptSlug, hmacKey, options)
+    if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
-
-    options = type(options) == "table" and options or {}
-    panelUrl = tostring(panelUrl):gsub("/$", "")
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/feed", {
         room = tostring(options.room or "global"),
@@ -547,6 +592,7 @@ function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
         return false, "missing panel config"
     end
 
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
     panelUrl = tostring(panelUrl):gsub("/$", "")
     options = type(options) == "table" and options or {}
 

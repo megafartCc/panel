@@ -356,6 +356,8 @@ local runtimeConfig = {
     hmacKey = nil,
 }
 
+local lastAutoHeartbeatAt = 0
+
 local function publishRuntimeConfig()
     if type(getgenv) ~= "function" then
         return
@@ -440,6 +442,16 @@ local function sendPing(panelUrl, scriptSlug, hmacKey, options)
     return success, response
 end
 
+local function maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+    local now = os.clock()
+    if (now - lastAutoHeartbeatAt) < 8 then
+        return
+    end
+
+    lastAutoHeartbeatAt = now
+    sendPing(panelUrl, scriptSlug, hmacKey, { debug = false })
+end
+
 function PanelSDK.cloudSave(panelUrl, scriptSlug, hmacKey, presetName, data)
     if not panelUrl or not scriptSlug or not hmacKey then
         return false, { error = "missing panel config" }
@@ -493,6 +505,9 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/peers", {
         jobid = tostring(options.jobid or game.JobId or ""),
         include_self = options.includeSelf == true or options.include_self == true,
@@ -506,6 +521,9 @@ function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
     if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/connections", {
         jobid = tostring(options.jobid or game.JobId or ""),
@@ -521,6 +539,9 @@ function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
+
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/servers", {
         include_self = options.includeSelf == true or options.include_self == true,
     })
@@ -533,6 +554,9 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
     if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     local text = tostring(messageText or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if text == "" then
@@ -551,6 +575,9 @@ function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
     if panelUrl == "" or scriptSlug == "" or hmacKey == "" then
         return false, { error = "missing panel config" }
     end
+
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/feed", {
         room = tostring(options.room or "global"),

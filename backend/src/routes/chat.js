@@ -196,6 +196,37 @@ function normalizeMessage(value) {
     return text;
 }
 
+function normalizeReplyPayload(payload) {
+    const body = payload && typeof payload === 'object' ? payload : {};
+    const replyObj = body.reply && typeof body.reply === 'object' ? body.reply : {};
+
+    const replyIdRaw = body.reply_to_id ?? body.replyToId ?? replyObj.id ?? replyObj.message_id ?? replyObj.messageId;
+    const parsedReplyId = Number.parseInt(replyIdRaw, 10);
+    const replyId = Number.isFinite(parsedReplyId) && parsedReplyId > 0 ? parsedReplyId : null;
+
+    const rawReplyUser = body.reply_to_user ?? body.replyToUser ?? replyObj.user ?? replyObj.username ?? replyObj.name ?? '';
+    const rawReplyUserId = body.reply_to_userid ?? body.replyToUserId ?? replyObj.userid ?? replyObj.userid_str ?? replyObj.userId ?? '';
+    const rawReplyMessage = body.reply_to_message ?? body.replyToMessage ?? replyObj.message ?? replyObj.text ?? replyObj.content ?? '';
+
+    const replyUser = String(rawReplyUser || '').trim().slice(0, 64);
+    const replyUserId = String(rawReplyUserId || '').trim().slice(0, 32);
+    let replyMessage = String(rawReplyMessage || '').replace(/\r/g, '').trim();
+    if (replyMessage.length > CHAT_MAX_MESSAGE_LENGTH) {
+        replyMessage = replyMessage.slice(0, CHAT_MAX_MESSAGE_LENGTH);
+    }
+
+    if (!replyId && !replyUser && !replyUserId && !replyMessage) {
+        return null;
+    }
+
+    return {
+        id: replyId,
+        user: replyUser,
+        userid: replyUserId,
+        message: replyMessage,
+    };
+}
+
 function parseDbTimestamp(value) {
     if (value instanceof Date) {
         return value;
@@ -228,11 +259,29 @@ function buildUtcMinus3Label(value) {
 }
 
 function mapMessageRow(row) {
+    const replyIdRaw = row.reply_to_id;
+    const parsedReplyId = Number.parseInt(replyIdRaw, 10);
+    const replyId = Number.isFinite(parsedReplyId) && parsedReplyId > 0 ? parsedReplyId : null;
+    const replyUser = row.reply_to_user != null ? String(row.reply_to_user) : '';
+    const replyUserId = row.reply_to_userid != null ? String(row.reply_to_userid) : '';
+    const replyMessage = row.reply_to_message != null ? String(row.reply_to_message) : '';
+    const hasReply = !!(replyId || replyUser || replyUserId || replyMessage);
+
     return {
         id: Number(row.id || 0),
         user: row.roblox_user != null ? String(row.roblox_user) : '',
         userid: row.roblox_userid != null ? String(row.roblox_userid) : '',
         message: row.message_content != null ? String(row.message_content) : '',
+        reply_to_id: replyId,
+        reply_to_user: replyUser,
+        reply_to_userid: replyUserId,
+        reply_to_message: replyMessage,
+        reply: hasReply ? {
+            id: replyId,
+            user: replyUser,
+            userid: replyUserId,
+            message: replyMessage,
+        } : null,
         room: row.room != null ? String(row.room) : CHAT_DEFAULT_ROOM,
         created_at: row.created_at || null,
         time_utc_minus3: buildUtcMinus3Label(row.created_at),
@@ -250,6 +299,7 @@ router.post('/send', async (req, res) => {
         const username = String(req.body.user || '').trim();
         const userid = String(req.body.userid || '').trim();
         const message = normalizeMessage(req.body.message || req.body.content || req.body.text);
+        const reply = normalizeReplyPayload(req.body);
         const room = normalizeRoom(req.body.room);
 
         if (!username || !userid || !message) {
@@ -264,9 +314,24 @@ router.post('/send', async (req, res) => {
                 roblox_user,
                 roblox_userid,
                 message_content,
+                reply_to_id,
+                reply_to_user,
+                reply_to_userid,
+                reply_to_message,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)`,
-            [verification.scriptRow.id, room, username, userid, message, createdAt]
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                verification.scriptRow.id,
+                room,
+                username,
+                userid,
+                message,
+                reply ? reply.id : null,
+                reply ? reply.user : '',
+                reply ? reply.userid : '',
+                reply ? reply.message : '',
+                createdAt,
+            ]
         );
 
         let insertedId = Number(insertResult.insertId || 0);
@@ -291,6 +356,16 @@ router.post('/send', async (req, res) => {
                 user: username,
                 userid,
                 message,
+                reply_to_id: reply ? reply.id : null,
+                reply_to_user: reply ? reply.user : '',
+                reply_to_userid: reply ? reply.userid : '',
+                reply_to_message: reply ? reply.message : '',
+                reply: reply ? {
+                    id: reply.id,
+                    user: reply.user,
+                    userid: reply.userid,
+                    message: reply.message,
+                } : null,
                 room,
                 created_at: createdAt,
                 time_utc_minus3: buildUtcMinus3Label(createdAt),
@@ -320,6 +395,7 @@ router.post('/feed', async (req, res) => {
             if (globalScope) {
                 rows = await dbAll(
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
                      WHERE room = ? AND id > ?
                      ORDER BY id ASC
@@ -329,6 +405,7 @@ router.post('/feed', async (req, res) => {
             } else {
                 rows = await dbAll(
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
                      WHERE script_id = ? AND room = ? AND id > ?
                      ORDER BY id ASC
@@ -340,6 +417,7 @@ router.post('/feed', async (req, res) => {
             if (globalScope) {
                 rows = await dbAll(
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
                      WHERE room = ?
                      ORDER BY id DESC
@@ -349,6 +427,7 @@ router.post('/feed', async (req, res) => {
             } else {
                 rows = await dbAll(
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
                      WHERE script_id = ? AND room = ?
                      ORDER BY id DESC

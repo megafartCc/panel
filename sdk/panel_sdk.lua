@@ -684,10 +684,30 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
         return false, { error = "empty_message" }
     end
 
+    local reply = type(options.reply) == "table" and options.reply or nil
+    local replyToId = tonumber(options.reply_to_id or options.replyToId or (reply and (reply.id or reply.message_id or reply.messageId)))
+    local replyToUser = tostring(options.reply_to_user or options.replyToUser or (reply and (reply.user or reply.username or reply.name)) or "")
+    local replyToUserId = tostring(options.reply_to_userid or options.replyToUserId or (reply and (reply.userid or reply.userid_str or reply.userId)) or "")
+    local replyToMessage = tostring(options.reply_to_message or options.replyToMessage or (reply and (reply.message or reply.text or reply.content)) or "")
+
+    if replyToUser ~= "" then
+        replyToUser = replyToUser:sub(1, 64)
+    end
+    if replyToUserId ~= "" then
+        replyToUserId = replyToUserId:sub(1, 32)
+    end
+    if replyToMessage ~= "" then
+        replyToMessage = replyToMessage:gsub("\r", ""):gsub("^%s+", ""):gsub("%s+$", ""):sub(1, 240)
+    end
+
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/send", {
         room = tostring(options.room or "global"),
         message = text,
         scope = resolveScopeOption(options),
+        reply_to_id = replyToId,
+        reply_to_user = replyToUser,
+        reply_to_userid = replyToUserId,
+        reply_to_message = replyToMessage,
     })
 end
 PanelSDK.ChatSend = PanelSDK.chatSend

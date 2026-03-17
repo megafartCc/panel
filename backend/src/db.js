@@ -246,6 +246,56 @@ async function ensureSessionsPlaceIdColumn() {
     }
 }
 
+async function ensureChatReplyColumns() {
+    await ensureDbReady();
+
+    if (isMySql()) {
+        const replyId = await dbGet("SHOW COLUMNS FROM chat_messages LIKE 'reply_to_id'");
+        if (!replyId) {
+            await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_id BIGINT NULL AFTER message_content");
+        }
+
+        const replyUser = await dbGet("SHOW COLUMNS FROM chat_messages LIKE 'reply_to_user'");
+        if (!replyUser) {
+            await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_user VARCHAR(64) DEFAULT '' AFTER reply_to_id");
+        }
+
+        const replyUserId = await dbGet("SHOW COLUMNS FROM chat_messages LIKE 'reply_to_userid'");
+        if (!replyUserId) {
+            await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_userid VARCHAR(32) DEFAULT '' AFTER reply_to_user");
+        }
+
+        const replyMessage = await dbGet("SHOW COLUMNS FROM chat_messages LIKE 'reply_to_message'");
+        if (!replyMessage) {
+            await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_message VARCHAR(512) DEFAULT '' AFTER reply_to_userid");
+        }
+        return;
+    }
+
+    const columns = await dbAll('PRAGMA table_info(chat_messages)');
+    const names = new Set();
+    if (Array.isArray(columns)) {
+        for (const column of columns) {
+            if (column && typeof column.name === 'string') {
+                names.add(column.name.toLowerCase());
+            }
+        }
+    }
+
+    if (!names.has('reply_to_id')) {
+        await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_id INTEGER");
+    }
+    if (!names.has('reply_to_user')) {
+        await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_user TEXT DEFAULT ''");
+    }
+    if (!names.has('reply_to_userid')) {
+        await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_userid TEXT DEFAULT ''");
+    }
+    if (!names.has('reply_to_message')) {
+        await dbRun("ALTER TABLE chat_messages ADD COLUMN reply_to_message TEXT DEFAULT ''");
+    }
+}
+
 async function migrate() {
     await ensureDbReady();
 
@@ -314,6 +364,10 @@ async function migrate() {
                 roblox_user VARCHAR(64) NOT NULL,
                 roblox_userid VARCHAR(32) NOT NULL,
                 message_content VARCHAR(512) NOT NULL,
+                reply_to_id BIGINT NULL,
+                reply_to_user VARCHAR(64) DEFAULT '',
+                reply_to_userid VARCHAR(32) DEFAULT '',
+                reply_to_message VARCHAR(512) DEFAULT '',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 KEY idx_chat_script_room_id (script_id, room, id),
                 KEY idx_chat_script_room_time (script_id, room, created_at),
@@ -378,6 +432,10 @@ async function migrate() {
                 roblox_user TEXT NOT NULL,
                 roblox_userid TEXT NOT NULL,
                 message_content TEXT NOT NULL,
+                reply_to_id INTEGER,
+                reply_to_user TEXT DEFAULT '',
+                reply_to_userid TEXT DEFAULT '',
+                reply_to_message TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
             )`,
@@ -395,6 +453,7 @@ async function migrate() {
 
     await ensureSessionsPlaceIdColumn();
     await ensureCloudPresetSchema();
+    await ensureChatReplyColumns();
 
     const adminUser = process.env.ADMIN_USER || 'admin';
     const adminPass = process.env.ADMIN_PASS || 'changeme123';

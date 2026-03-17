@@ -465,6 +465,26 @@ local function resolveConfig(panelUrl, scriptSlug, hmacKey, options)
     return panelUrl, scriptSlug, hmacKey, options
 end
 
+local function resolveScopeOption(options)
+    if type(options) ~= "table" then
+        return nil
+    end
+
+    local scope = options.scope or options.Scope
+    if scope == nil and (options.global == true or options.global_scope == true or options.shared_scope == true) then
+        scope = "global"
+    end
+    if scope == nil then
+        return nil
+    end
+
+    local text = tostring(scope)
+    if text == "" then
+        return nil
+    end
+    return text
+end
+
 resolveSigningKey = function(defaultKey, options)
     options = type(options) == "table" and options or {}
     local fromOptions = options.customKey or options.custom_key or options.panelKey or options.key
@@ -609,6 +629,7 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/peers", {
         jobid = tostring(options.jobid or game.JobId or ""),
         include_self = options.includeSelf == true or options.include_self == true,
+        scope = resolveScopeOption(options),
     })
 end
 PanelSDK.SharedUsers = PanelSDK.sharedUsers
@@ -626,6 +647,7 @@ function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/connections", {
         jobid = tostring(options.jobid or game.JobId or ""),
         include_self = options.includeSelf ~= false and options.include_self ~= false,
+        scope = resolveScopeOption(options),
     })
 end
 PanelSDK.ConnectionStats = PanelSDK.connectionStats
@@ -642,6 +664,7 @@ function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/servers", {
         include_self = options.includeSelf == true or options.include_self == true,
+        scope = resolveScopeOption(options),
     })
 end
 PanelSDK.SharedServers = PanelSDK.sharedServers
@@ -664,6 +687,7 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/send", {
         room = tostring(options.room or "global"),
         message = text,
+        scope = resolveScopeOption(options),
     })
 end
 PanelSDK.ChatSend = PanelSDK.chatSend
@@ -681,6 +705,7 @@ function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
         room = tostring(options.room or "global"),
         after_id = tonumber(options.after_id or options.afterId or 0) or 0,
         limit = tonumber(options.limit or 60) or 60,
+        scope = resolveScopeOption(options),
     })
 end
 PanelSDK.ChatFeed = PanelSDK.chatFeed

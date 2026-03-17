@@ -135,6 +135,21 @@ function validateSignedRequest({ route, script, userid, timestamp, signature, hm
     return { ok: true };
 }
 
+function isTruthyScope(value) {
+    if (value === true || value === 1) {
+        return true;
+    }
+    const text = String(value || '').trim().toLowerCase();
+    return text === '1' || text === 'true' || text === 'yes' || text === 'global' || text === 'all' || text === 'shared';
+}
+
+function useGlobalScope(body) {
+    return isTruthyScope(body?.scope)
+        || isTruthyScope(body?.global_scope)
+        || isTruthyScope(body?.shared_scope)
+        || isTruthyScope(body?.global);
+}
+
 router.post('/', async (req, res) => {
     try {
         const body = req.body || {};
@@ -210,6 +225,7 @@ router.post('/peers', async (req, res) => {
         const body = req.body || {};
         const script = String(body.script || body.slug || body.script_slug || '').trim();
         const { userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = body;
+        const globalScope = useGlobalScope(body);
 
         if (!script || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -245,11 +261,14 @@ router.post('/peers', async (req, res) => {
         let query = `
             SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
             FROM sessions
-            WHERE script_id = ?
-                AND is_active = 1
+            WHERE is_active = 1
                 AND last_heartbeat >= ?
         `;
-        const params = [scriptRow.id, activeCutoff];
+        const params = [activeCutoff];
+        if (!globalScope) {
+            query += ' AND script_id = ?';
+            params.push(scriptRow.id);
+        }
         const normalizedJobId = String(jobid || '').trim();
 
         if (normalizedJobId !== '') {
@@ -294,6 +313,7 @@ router.post('/peers', async (req, res) => {
         res.json({
             ok: true,
             script: String(script),
+            scope: globalScope ? 'global' : 'script',
             jobid: normalizedJobId,
             count: users.length,
             users,
@@ -309,6 +329,7 @@ router.post('/connections', async (req, res) => {
         const body = req.body || {};
         const script = String(body.script || body.slug || body.script_slug || '').trim();
         const { userid, jobid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = body;
+        const globalScope = useGlobalScope(body);
 
         if (!script || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -341,14 +362,18 @@ router.post('/connections', async (req, res) => {
         }
 
         const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
-        const rows = await dbAll(
-            `SELECT roblox_userid, server_jobid
-             FROM sessions
-             WHERE script_id = ?
-                AND is_active = 1
-                AND last_heartbeat >= ?`,
-            [scriptRow.id, activeCutoff]
-        );
+        let connectionsSql = `
+            SELECT roblox_userid, server_jobid
+            FROM sessions
+            WHERE is_active = 1
+                AND last_heartbeat >= ?
+        `;
+        const connectionsParams = [activeCutoff];
+        if (!globalScope) {
+            connectionsSql += ' AND script_id = ?';
+            connectionsParams.push(scriptRow.id);
+        }
+        const rows = await dbAll(connectionsSql, connectionsParams);
 
         const requesterId = String(userid);
         const normalizedJobId = String(jobid || '').trim();
@@ -385,6 +410,7 @@ router.post('/connections', async (req, res) => {
         res.json({
             ok: true,
             script: String(script),
+            scope: globalScope ? 'global' : 'script',
             total_active: seenUsers.size,
             total_servers: uniqueServers.size,
             current_server_active: currentServerActive,
@@ -400,6 +426,7 @@ router.post('/servers', async (req, res) => {
         const body = req.body || {};
         const script = String(body.script || body.slug || body.script_slug || '').trim();
         const { userid, timestamp, signature, include_self: includeSelfRaw, includeSelf } = body;
+        const globalScope = useGlobalScope(body);
 
         if (!script || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -432,16 +459,19 @@ router.post('/servers', async (req, res) => {
         }
 
         const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
-        const rows = await dbAll(
-            `SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
-             FROM sessions
-             WHERE script_id = ?
-                AND is_active = 1
+        let serversSql = `
+            SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
+            FROM sessions
+            WHERE is_active = 1
                 AND last_heartbeat >= ?
-             ORDER BY last_heartbeat DESC
-             LIMIT 600`,
-            [scriptRow.id, activeCutoff]
-        );
+        `;
+        const serversParams = [activeCutoff];
+        if (!globalScope) {
+            serversSql += ' AND script_id = ?';
+            serversParams.push(scriptRow.id);
+        }
+        serversSql += ' ORDER BY last_heartbeat DESC LIMIT 600';
+        const rows = await dbAll(serversSql, serversParams);
 
         const requesterId = String(userid);
         const allowSelf = includeSelfRaw !== false
@@ -503,6 +533,7 @@ router.post('/servers', async (req, res) => {
         res.json({
             ok: true,
             script: String(script),
+            scope: globalScope ? 'global' : 'script',
             total_servers: servers.length,
             total_users: globalSeen.size,
             servers,

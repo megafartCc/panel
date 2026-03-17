@@ -167,6 +167,21 @@ function normalizeRoom(roomRaw) {
     return room;
 }
 
+function isTruthyScope(value) {
+    if (value === true || value === 1) {
+        return true;
+    }
+    const text = String(value || '').trim().toLowerCase();
+    return text === '1' || text === 'true' || text === 'yes' || text === 'global' || text === 'all' || text === 'shared';
+}
+
+function useGlobalScope(payload) {
+    return isTruthyScope(payload?.scope)
+        || isTruthyScope(payload?.global_scope)
+        || isTruthyScope(payload?.shared_scope)
+        || isTruthyScope(payload?.global);
+}
+
 function normalizeMessage(value) {
     if (typeof value !== 'string' && typeof value !== 'number') {
         return null;
@@ -230,6 +245,7 @@ router.post('/send', async (req, res) => {
         if (!verification.ok) {
             return res.status(verification.status).json({ error: verification.error });
         }
+        const globalScope = useGlobalScope(req.body);
 
         const username = String(req.body.user || '').trim();
         const userid = String(req.body.userid || '').trim();
@@ -269,6 +285,7 @@ router.post('/send', async (req, res) => {
         return res.json({
             ok: true,
             id: insertedId,
+            scope: globalScope ? 'global' : 'script',
             message: {
                 id: insertedId,
                 user: username,
@@ -291,6 +308,7 @@ router.post('/feed', async (req, res) => {
         if (!verification.ok) {
             return res.status(verification.status).json({ error: verification.error });
         }
+        const globalScope = useGlobalScope(req.body);
 
         const room = normalizeRoom(req.body.room);
         const afterId = Math.max(0, Number.parseInt(req.body.after_id || req.body.afterId || '0', 10) || 0);
@@ -299,23 +317,45 @@ router.post('/feed', async (req, res) => {
 
         let rows = [];
         if (afterId > 0) {
-            rows = await dbAll(
-                `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
-                 FROM chat_messages
-                 WHERE script_id = ? AND room = ? AND id > ?
-                 ORDER BY id ASC
-                 LIMIT ?`,
-                [verification.scriptRow.id, room, afterId, limit]
-            );
+            if (globalScope) {
+                rows = await dbAll(
+                    `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     FROM chat_messages
+                     WHERE room = ? AND id > ?
+                     ORDER BY id ASC
+                     LIMIT ?`,
+                    [room, afterId, limit]
+                );
+            } else {
+                rows = await dbAll(
+                    `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     FROM chat_messages
+                     WHERE script_id = ? AND room = ? AND id > ?
+                     ORDER BY id ASC
+                     LIMIT ?`,
+                    [verification.scriptRow.id, room, afterId, limit]
+                );
+            }
         } else {
-            rows = await dbAll(
-                `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
-                 FROM chat_messages
-                 WHERE script_id = ? AND room = ?
-                 ORDER BY id DESC
-                 LIMIT ?`,
-                [verification.scriptRow.id, room, limit]
-            );
+            if (globalScope) {
+                rows = await dbAll(
+                    `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     FROM chat_messages
+                     WHERE room = ?
+                     ORDER BY id DESC
+                     LIMIT ?`,
+                    [room, limit]
+                );
+            } else {
+                rows = await dbAll(
+                    `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
+                     FROM chat_messages
+                     WHERE script_id = ? AND room = ?
+                     ORDER BY id DESC
+                     LIMIT ?`,
+                    [verification.scriptRow.id, room, limit]
+                );
+            }
             rows.reverse();
         }
 
@@ -325,6 +365,7 @@ router.post('/feed', async (req, res) => {
         return res.json({
             ok: true,
             room,
+            scope: globalScope ? 'global' : 'script',
             count: messages.length,
             last_id: lastId,
             messages,

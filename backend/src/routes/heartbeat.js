@@ -259,24 +259,32 @@ router.post('/peers', async (req, res) => {
 
         const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
         let query = `
-            SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
-            FROM sessions
-            WHERE is_active = 1
-                AND last_heartbeat >= ?
+            SELECT
+                s.roblox_user,
+                s.roblox_userid,
+                s.server_jobid,
+                s.place_id,
+                s.last_heartbeat,
+                sc.slug AS script_slug,
+                sc.name AS script_name
+            FROM sessions s
+            LEFT JOIN scripts sc ON sc.id = s.script_id
+            WHERE s.is_active = 1
+                AND s.last_heartbeat >= ?
         `;
         const params = [activeCutoff];
         if (!globalScope) {
-            query += ' AND script_id = ?';
+            query += ' AND s.script_id = ?';
             params.push(scriptRow.id);
         }
         const normalizedJobId = String(jobid || '').trim();
 
         if (normalizedJobId !== '') {
-            query += ' AND server_jobid = ?';
+            query += ' AND s.server_jobid = ?';
             params.push(normalizedJobId);
         }
 
-        query += ' ORDER BY last_heartbeat DESC LIMIT 200';
+        query += ' ORDER BY s.last_heartbeat DESC LIMIT 200';
 
         const rows = await dbAll(query, params);
         const requesterId = String(userid);
@@ -303,6 +311,11 @@ router.post('/peers', async (req, res) => {
                 userid: rowUserId,
                 jobid: row && row.server_jobid != null ? String(row.server_jobid) : '',
                 placeid: row && row.place_id != null ? String(row.place_id) : '',
+                script_slug: row && row.script_slug != null ? String(row.script_slug) : '',
+                script_name: row && row.script_name != null ? String(row.script_name) : '',
+                game: row && row.script_name != null && String(row.script_name).trim() !== ''
+                    ? String(row.script_name)
+                    : (row && row.script_slug != null ? String(row.script_slug) : ''),
                 join_url: row && row.place_id && row.server_jobid
                     ? `roblox://placeID=${String(row.place_id)}&gameInstanceId=${String(row.server_jobid)}`
                     : '',
@@ -460,17 +473,25 @@ router.post('/servers', async (req, res) => {
 
         const activeCutoff = getCutoffDateTime(ACTIVE_SESSION_TIMEOUT_SECONDS + 5);
         let serversSql = `
-            SELECT roblox_user, roblox_userid, server_jobid, place_id, last_heartbeat
-            FROM sessions
-            WHERE is_active = 1
-                AND last_heartbeat >= ?
+            SELECT
+                s.roblox_user,
+                s.roblox_userid,
+                s.server_jobid,
+                s.place_id,
+                s.last_heartbeat,
+                sc.slug AS script_slug,
+                sc.name AS script_name
+            FROM sessions s
+            LEFT JOIN scripts sc ON sc.id = s.script_id
+            WHERE s.is_active = 1
+                AND s.last_heartbeat >= ?
         `;
         const serversParams = [activeCutoff];
         if (!globalScope) {
-            serversSql += ' AND script_id = ?';
+            serversSql += ' AND s.script_id = ?';
             serversParams.push(scriptRow.id);
         }
-        serversSql += ' ORDER BY last_heartbeat DESC LIMIT 600';
+        serversSql += ' ORDER BY s.last_heartbeat DESC LIMIT 600';
         const rows = await dbAll(serversSql, serversParams);
 
         const requesterId = String(userid);
@@ -486,6 +507,9 @@ router.post('/servers', async (req, res) => {
             const rowUserId = row && row.roblox_userid != null ? String(row.roblox_userid) : '';
             const rowJobId = row && row.server_jobid != null ? String(row.server_jobid).trim() : '';
             const rowPlaceId = row && row.place_id != null ? String(row.place_id).trim() : '';
+            const rowScriptSlug = row && row.script_slug != null ? String(row.script_slug).trim() : '';
+            const rowScriptName = row && row.script_name != null ? String(row.script_name).trim() : '';
+            const rowGameName = rowScriptName || rowScriptSlug || (rowPlaceId !== '' ? `Place ${rowPlaceId}` : '');
 
             if (rowJobId === '' || rowUserId === '') {
                 continue;
@@ -498,10 +522,15 @@ router.post('/servers', async (req, res) => {
             }
             globalSeen.add(rowUserId);
 
-            if (!grouped.has(rowJobId)) {
-                grouped.set(rowJobId, {
+            const groupKey = `${rowJobId}|${rowPlaceId}|${rowScriptSlug}`;
+
+            if (!grouped.has(groupKey)) {
+                grouped.set(groupKey, {
                     jobid: rowJobId,
                     placeid: rowPlaceId,
+                    script_slug: rowScriptSlug,
+                    script_name: rowScriptName,
+                    game: rowGameName,
                     join_url: rowPlaceId !== '' && rowJobId !== ''
                         ? `roblox://placeID=${rowPlaceId}&gameInstanceId=${rowJobId}`
                         : '',
@@ -511,10 +540,13 @@ router.post('/servers', async (req, res) => {
                 });
             }
 
-            const bucket = grouped.get(rowJobId);
+            const bucket = grouped.get(groupKey);
             bucket.users.push({
                 user: rowUser,
                 userid: rowUserId,
+                script_slug: rowScriptSlug,
+                script_name: rowScriptName,
+                game: rowGameName,
                 last_heartbeat: row && row.last_heartbeat ? row.last_heartbeat : null,
             });
             bucket.count += 1;
@@ -526,6 +558,11 @@ router.post('/servers', async (req, res) => {
                 const countB = Number(b && b.count) || 0;
                 if (countA !== countB) {
                     return countB - countA;
+                }
+                const gameA = String(a && a.game || '');
+                const gameB = String(b && b.game || '');
+                if (gameA !== gameB) {
+                    return gameA.localeCompare(gameB);
                 }
                 return String(a && a.jobid || '').localeCompare(String(b && b.jobid || ''));
             });

@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
-const { dbAll, dbGet, dbRun, getCutoffDateTime, isMySql, toDbDateTime } = require('../db');
+const { dbAll, dbGet, dbRun, getCutoffDateTime, isMySql, isVolatileRuntime, toDbDateTime } = require('../db');
 
 const router = express.Router();
 
@@ -220,7 +220,8 @@ router.post('/', async (req, res) => {
             return res.json({ ok: true, inserted: 0, ignored: 0, skipped: 'empty' });
         }
 
-        const insertSql = isMySql()
+        const useMySqlFinderDialect = isMySql() && !isVolatileRuntime();
+        const insertSql = useMySqlFinderDialect
             ? `INSERT IGNORE INTO finder_reports (
                 script_id,
                 server_jobid,

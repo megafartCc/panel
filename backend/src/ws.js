@@ -2,6 +2,7 @@ const { dbRun, getCutoffDateTime } = require('./db');
 
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(1, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
 const FINDER_RETENTION_SECONDS = Math.max(60, Number(process.env.FINDER_RETENTION_SECONDS) || 600);
+const CHAT_RETENTION_SECONDS = Math.max(60, Number(process.env.CHAT_RETENTION_SECONDS) || 300);
 
 function startCleanupTimer() {
     setInterval(async () => {
@@ -22,6 +23,15 @@ function startCleanupTimer() {
             );
             if (staleFinder.changes > 0) {
                 console.log(`[Cleanup] Pruned ${staleFinder.changes} stale finder rows`);
+            }
+
+            const chatCutoff = getCutoffDateTime(CHAT_RETENTION_SECONDS);
+            const staleChat = await dbRun(
+                'DELETE FROM chat_messages WHERE created_at < ?',
+                [chatCutoff]
+            );
+            if (staleChat.changes > 0) {
+                console.log(`[Cleanup] Pruned ${staleChat.changes} stale chat rows`);
             }
         } catch (err) {
             console.error('[Cleanup] Error:', err.message);

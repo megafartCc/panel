@@ -11,6 +11,12 @@ let sqliteDb = null;
 let mysqlPool = null;
 let dbKind = null; // 'sqlite' | 'mysql'
 let dbInitPromise = null;
+let volatileDb = null;
+let volatileScriptsSynced = false;
+let inMigration = false;
+
+const VOLATILE_RUNTIME_ONLY = String(process.env.VOLATILE_RUNTIME_ONLY ?? 'true').toLowerCase() !== 'false';
+const VOLATILE_TABLE_PATTERN = /\b(?:sessions|heartbeat_log|finder_reports|chat_messages)\b/i;
 
 function toDbDateTime(date = new Date()) {
     return date.toISOString().slice(0, 19).replace('T', ' ');
@@ -23,6 +29,32 @@ function getCutoffDateTime(seconds) {
 
 function isMySql() {
     return dbKind === 'mysql';
+}
+
+function isVolatileRuntime() {
+    return VOLATILE_RUNTIME_ONLY;
+}
+
+function shouldUseVolatileDb(sql) {
+    if (!VOLATILE_RUNTIME_ONLY || inMigration) {
+        return false;
+    }
+    const text = String(sql || '');
+    if (!text) {
+        return false;
+    }
+    return VOLATILE_TABLE_PATTERN.test(text);
+}
+
+function shouldRefreshVolatileScripts(sql) {
+    if (!VOLATILE_RUNTIME_ONLY) {
+        return false;
+    }
+    const text = String(sql || '');
+    if (!text) {
+        return false;
+    }
+    return /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+scripts\b/i.test(text);
 }
 
 function resolveMySqlConfig() {
@@ -106,7 +138,142 @@ async function ensureDbReady() {
     await dbInitPromise;
 }
 
-async function dbGet(sql, params = []) {
+function initVolatileDb() {
+    if (!VOLATILE_RUNTIME_ONLY || volatileDb) {
+        return;
+    }
+
+    volatileDb = new Database(':memory:');
+    volatileDb.pragma('journal_mode = MEMORY');
+    volatileDb.pragma('foreign_keys = OFF');
+    volatileDb.pragma('synchronous = OFF');
+    volatileDb.pragma('temp_store = MEMORY');
+    volatileDb.pragma('cache_size = 10000');
+
+    volatileDb.exec(`
+        CREATE TABLE IF NOT EXISTS scripts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            slug TEXT UNIQUE NOT NULL,
+            hmac_key TEXT NOT NULL,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            script_id TEXT NOT NULL,
+            roblox_user TEXT NOT NULL,
+            roblox_userid TEXT NOT NULL,
+            executor TEXT DEFAULT 'Unknown',
+            server_jobid TEXT DEFAULT '',
+            place_id TEXT DEFAULT '',
+            ip_address TEXT DEFAULT '',
+            first_seen TEXT DEFAULT (datetime('now')),
+            last_heartbeat TEXT DEFAULT (datetime('now')),
+            is_active INTEGER DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS heartbeat_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            timestamp TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS finder_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            script_id TEXT NOT NULL,
+            server_jobid TEXT NOT NULL,
+            place_id TEXT DEFAULT '',
+            reported_by_user TEXT DEFAULT '',
+            reported_by_userid TEXT DEFAULT '',
+            executor TEXT DEFAULT 'Unknown',
+            player_count INTEGER DEFAULT 0,
+            brainrot_key TEXT NOT NULL,
+            brainrot_name TEXT NOT NULL,
+            money_per_sec REAL DEFAULT 0,
+            discovered_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(script_id, server_jobid, brainrot_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            script_id TEXT NOT NULL,
+            room TEXT NOT NULL DEFAULT 'global',
+            roblox_user TEXT NOT NULL,
+            roblox_userid TEXT NOT NULL,
+            message_content TEXT NOT NULL,
+            reply_to_id INTEGER,
+            reply_to_user TEXT DEFAULT '',
+            reply_to_userid TEXT DEFAULT '',
+            reply_to_message TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active);
+        CREATE INDEX IF NOT EXISTS idx_sessions_script ON sessions(script_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_last_hb ON sessions(last_heartbeat);
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_log_ts ON heartbeat_log(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_heartbeat_log_session ON heartbeat_log(session_id);
+        CREATE INDEX IF NOT EXISTS idx_finder_reports_script_time ON finder_reports(script_id, discovered_at);
+        CREATE INDEX IF NOT EXISTS idx_finder_reports_server_time ON finder_reports(server_jobid, discovered_at);
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_script_room_id ON chat_messages(script_id, room, id);
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_script_room_time ON chat_messages(script_id, room, created_at);
+    `);
+
+    volatileScriptsSynced = false;
+    console.log('[DB] Volatile runtime store enabled for sessions/chat/finder/heartbeat');
+}
+
+async function syncVolatileScriptsFromPrimary() {
+    if (!VOLATILE_RUNTIME_ONLY) {
+        return;
+    }
+    await ensureDbReady();
+    initVolatileDb();
+    if (!volatileDb) {
+        return;
+    }
+
+    let rows = [];
+    if (isMySql()) {
+        const [mysqlRows] = await mysqlPool.query('SELECT id, name, slug, hmac_key, created_at FROM scripts');
+        rows = Array.isArray(mysqlRows) ? mysqlRows : [];
+    } else {
+        rows = sqliteDb.prepare('SELECT id, name, slug, hmac_key, created_at FROM scripts').all();
+    }
+
+    const clearStmt = volatileDb.prepare('DELETE FROM scripts');
+    const insertStmt = volatileDb.prepare(
+        'INSERT INTO scripts (id, name, slug, hmac_key, created_at) VALUES (?, ?, ?, ?, ?)'
+    );
+    const tx = volatileDb.transaction((items) => {
+        clearStmt.run();
+        for (const row of items) {
+            insertStmt.run(
+                String(row.id || ''),
+                String(row.name || ''),
+                String(row.slug || ''),
+                String(row.hmac_key || ''),
+                row.created_at ? String(row.created_at) : null
+            );
+        }
+    });
+    tx(rows);
+    volatileScriptsSynced = true;
+}
+
+async function ensureVolatileReady() {
+    if (!VOLATILE_RUNTIME_ONLY) {
+        return;
+    }
+    await ensureDbReady();
+    initVolatileDb();
+    if (!volatileScriptsSynced) {
+        await syncVolatileScriptsFromPrimary();
+    }
+}
+
+async function primaryDbGet(sql, params = []) {
     await ensureDbReady();
     if (isMySql()) {
         const [rows] = await mysqlPool.query(sql, params);
@@ -115,7 +282,7 @@ async function dbGet(sql, params = []) {
     return sqliteDb.prepare(sql).get(...params) || null;
 }
 
-async function dbAll(sql, params = []) {
+async function primaryDbAll(sql, params = []) {
     await ensureDbReady();
     if (isMySql()) {
         const [rows] = await mysqlPool.query(sql, params);
@@ -124,7 +291,7 @@ async function dbAll(sql, params = []) {
     return sqliteDb.prepare(sql).all(...params);
 }
 
-async function dbRun(sql, params = []) {
+async function primaryDbRun(sql, params = []) {
     await ensureDbReady();
     if (isMySql()) {
         const [result] = await mysqlPool.query(sql, params);
@@ -139,6 +306,39 @@ async function dbRun(sql, params = []) {
         changes: Number(result.changes || 0),
         insertId: Number(result.lastInsertRowid || 0),
     };
+}
+
+async function dbGet(sql, params = []) {
+    if (shouldUseVolatileDb(sql)) {
+        await ensureVolatileReady();
+        return volatileDb.prepare(sql).get(...params) || null;
+    }
+    return primaryDbGet(sql, params);
+}
+
+async function dbAll(sql, params = []) {
+    if (shouldUseVolatileDb(sql)) {
+        await ensureVolatileReady();
+        return volatileDb.prepare(sql).all(...params);
+    }
+    return primaryDbAll(sql, params);
+}
+
+async function dbRun(sql, params = []) {
+    if (shouldUseVolatileDb(sql)) {
+        await ensureVolatileReady();
+        const result = volatileDb.prepare(sql).run(...params);
+        return {
+            changes: Number(result.changes || 0),
+            insertId: Number(result.lastInsertRowid || 0),
+        };
+    }
+
+    const result = await primaryDbRun(sql, params);
+    if (shouldRefreshVolatileScripts(sql)) {
+        await syncVolatileScriptsFromPrimary();
+    }
+    return result;
 }
 
 async function runStatements(statements) {
@@ -391,9 +591,11 @@ async function ensureTradeSchema() {
 
 async function migrate() {
     await ensureDbReady();
+    inMigration = true;
 
-    if (isMySql()) {
-        await runStatements([
+    try {
+        if (isMySql()) {
+            await runStatements([
             `CREATE TABLE IF NOT EXISTS admin_users (
                 id CHAR(36) PRIMARY KEY,
                 username VARCHAR(64) UNIQUE NOT NULL,
@@ -541,29 +743,29 @@ async function migrate() {
             'CREATE INDEX IF NOT EXISTS idx_finder_reports_server_time ON finder_reports(server_jobid, discovered_at)',
             'CREATE INDEX IF NOT EXISTS idx_chat_messages_script_room_id ON chat_messages(script_id, room, id)',
             'CREATE INDEX IF NOT EXISTS idx_chat_messages_script_room_time ON chat_messages(script_id, room, created_at)',
-        ]);
-    }
+            ]);
+        }
 
-    await ensureSessionsPlaceIdColumn();
-    await ensureCloudPresetSchema();
-    await ensureChatReplyColumns();
-    await ensureTradeSchema();
+        await ensureSessionsPlaceIdColumn();
+        await ensureCloudPresetSchema();
+        await ensureChatReplyColumns();
+        await ensureTradeSchema();
 
-    const adminUser = process.env.ADMIN_USER || 'admin';
-    const adminPass = process.env.ADMIN_PASS || 'changeme123';
-    const existingAdmin = await dbGet('SELECT id FROM admin_users WHERE username = ?', [adminUser]);
-    if (!existingAdmin) {
-        const hash = bcrypt.hashSync(adminPass, 12);
-        await dbRun('INSERT INTO admin_users (id, username, password_hash) VALUES (?, ?, ?)', [
-            uuidv4(),
-            adminUser,
-            hash,
-        ]);
-        console.log(`[DB] Created default admin user: ${adminUser}`);
-    }
+        const adminUser = process.env.ADMIN_USER || 'admin';
+        const adminPass = process.env.ADMIN_PASS || 'changeme123';
+        const existingAdmin = await dbGet('SELECT id FROM admin_users WHERE username = ?', [adminUser]);
+        if (!existingAdmin) {
+            const hash = bcrypt.hashSync(adminPass, 12);
+            await dbRun('INSERT INTO admin_users (id, username, password_hash) VALUES (?, ?, ?)', [
+                uuidv4(),
+                adminUser,
+                hash,
+            ]);
+            console.log(`[DB] Created default admin user: ${adminUser}`);
+        }
 
-    const sharedEnvKey = process.env.PANEL_SHARED_HMAC_KEY || process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY;
-    const seededScripts = [
+        const sharedEnvKey = process.env.PANEL_SHARED_HMAC_KEY || process.env.SABNEW_HMAC_KEY || process.env.PANEL_SABNEW_HMAC_KEY;
+        const seededScripts = [
         {
             name: 'SAB New',
             slug: 'sabnew',
@@ -606,10 +808,18 @@ async function migrate() {
             envName: 'BLOXFRUITS_HMAC_KEY',
             envKey: process.env.BLOXFRUITS_HMAC_KEY || process.env.PANEL_BLOXFRUITS_HMAC_KEY || sharedEnvKey || 'DSD3213232sfdxzcvxcfhhjgfj',
         },
-    ];
+        ];
 
-    for (const script of seededScripts) {
-        await syncSeededScript(script);
+        for (const script of seededScripts) {
+            await syncSeededScript(script);
+        }
+    } finally {
+        inMigration = false;
+    }
+
+    if (VOLATILE_RUNTIME_ONLY) {
+        initVolatileDb();
+        await syncVolatileScriptsFromPrimary();
     }
 
     console.log(`[DB] Migrations complete (${dbKind})`);
@@ -623,6 +833,7 @@ module.exports = {
     ensureTradeSchema,
     getCutoffDateTime,
     isMySql,
+    isVolatileRuntime,
     migrate,
     toDbDateTime,
 };

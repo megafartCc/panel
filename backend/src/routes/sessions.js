@@ -1,5 +1,5 @@
 const express = require('express');
-const { dbAll, dbGet, getCutoffDateTime, isMySql } = require('../db');
+const { dbAll, dbGet, getCutoffDateTime, isMySql, isVolatileRuntime } = require('../db');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
@@ -95,7 +95,8 @@ router.get('/stats', async (req, res) => {
             ) grouped_users
         `);
 
-        const hourlySql = isMySql()
+        const useMySqlHeartbeatDialect = isMySql() && !isVolatileRuntime();
+        const hourlySql = useMySqlHeartbeatDialect
             ? `
                 SELECT
                     DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00') AS hour,

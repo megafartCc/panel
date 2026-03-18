@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { dbAll, dbGet, dbRun, toDbDateTime } = require('../db');
+const { dbAll, dbGet, dbRun, getCutoffDateTime, toDbDateTime } = require('../db');
 
 const router = express.Router();
 
@@ -10,6 +10,7 @@ const CHAT_DEFAULT_LIMIT = Math.max(5, Number(process.env.CHAT_DEFAULT_LIMIT) ||
 const CHAT_MAX_LIMIT = Math.max(CHAT_DEFAULT_LIMIT, Number(process.env.CHAT_MAX_LIMIT) || 150);
 const CHAT_DEFAULT_ROOM = 'global';
 const CHAT_TYPING_TTL_SECONDS = Math.max(3, Number(process.env.CHAT_TYPING_TTL_SECONDS) || 7);
+const CHAT_RETENTION_SECONDS = Math.max(60, Number(process.env.CHAT_RETENTION_SECONDS) || 300);
 const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
 const GLOBAL_UILIB_KEYS = [
     process.env.UILIB_CHAT_KEY,
@@ -495,6 +496,7 @@ router.post('/feed', async (req, res) => {
         const afterId = Math.max(0, Number.parseInt(req.body.after_id || req.body.afterId || '0', 10) || 0);
         const requestedLimit = Number.parseInt(req.body.limit || '', 10);
         const limit = Math.max(1, Math.min(Number.isFinite(requestedLimit) ? requestedLimit : CHAT_DEFAULT_LIMIT, CHAT_MAX_LIMIT));
+        const chatCutoff = getCutoffDateTime(CHAT_RETENTION_SECONDS);
 
         let rows = [];
         if (afterId > 0) {
@@ -503,20 +505,20 @@ router.post('/feed', async (req, res) => {
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
                      , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
-                     WHERE room = ? AND id > ?
+                     WHERE room = ? AND id > ? AND created_at >= ?
                      ORDER BY id ASC
                      LIMIT ?`,
-                    [room, afterId, limit]
+                    [room, afterId, chatCutoff, limit]
                 );
             } else {
                 rows = await dbAll(
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
                      , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
-                     WHERE script_id = ? AND room = ? AND id > ?
+                     WHERE script_id = ? AND room = ? AND id > ? AND created_at >= ?
                      ORDER BY id ASC
                      LIMIT ?`,
-                    [verification.scriptRow.id, room, afterId, limit]
+                    [verification.scriptRow.id, room, afterId, chatCutoff, limit]
                 );
             }
         } else {
@@ -525,20 +527,20 @@ router.post('/feed', async (req, res) => {
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
                      , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
-                     WHERE room = ?
+                     WHERE room = ? AND created_at >= ?
                      ORDER BY id DESC
                      LIMIT ?`,
-                    [room, limit]
+                    [room, chatCutoff, limit]
                 );
             } else {
                 rows = await dbAll(
                     `SELECT id, room, roblox_user, roblox_userid, message_content, created_at
                      , reply_to_id, reply_to_user, reply_to_userid, reply_to_message
                      FROM chat_messages
-                     WHERE script_id = ? AND room = ?
+                     WHERE script_id = ? AND room = ? AND created_at >= ?
                      ORDER BY id DESC
                      LIMIT ?`,
-                    [verification.scriptRow.id, room, limit]
+                    [verification.scriptRow.id, room, chatCutoff, limit]
                 );
             }
             rows.reverse();

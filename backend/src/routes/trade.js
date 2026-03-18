@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { authMiddleware } = require('../middleware/auth');
-const { dbAll, dbGet, dbRun, ensureTradeSchema, isMySql, toDbDateTime } = require('../db');
+const { dbAll, dbGet, dbRun, ensureTradeSchema, getCutoffDateTime, isMySql, toDbDateTime } = require('../db');
 
 const router = express.Router();
 
@@ -182,6 +182,9 @@ router.post('/inventory', async (req, res) => {
 // =============================================
 router.get('/inventory', authMiddleware, async (req, res) => {
     try {
+        const cutoff = getCutoffDateTime(INVENTORY_STALE_SECONDS);
+        await dbRun('DELETE FROM trade_inventory WHERE updated_at < ?', [cutoff]);
+
         const rows = await dbAll(
             `SELECT ti.roblox_userid, ti.roblox_user, ti.inventory_json, ti.updated_at,
                     s.slug AS script_slug, s.name AS script_name

@@ -16,6 +16,7 @@ const sessionsRoutes = require('./routes/sessions');
 const finderRoutes = require('./routes/finder');
 const cloudRoutes = require('./routes/cloud');
 const chatRoutes = require('./routes/chat');
+const tradeRoutes = require('./routes/trade');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -40,6 +41,7 @@ app.use('/api/sessions', sessionsRoutes);
 app.use('/api/finder', finderRoutes);
 app.use('/api/cloud', cloudRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/trade', tradeRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

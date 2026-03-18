@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     Activity,
     BarChart3,
+    Brain,
     Code2,
     LogOut,
     Search,
@@ -24,6 +25,7 @@ export default function Layout() {
     const navItems = [
         { to: '/', label: 'Dashboard', icon: BarChart3, hint: 'Analytics and finder feed' },
         { to: '/scripts', label: 'Scripts', icon: Code2, hint: 'Registry and keys' },
+        { to: '/brainrotsinfo', label: 'Brainrots', icon: Brain, hint: 'Player inventories & trading' },
     ];
 
     const handleLogout = () => {
@@ -33,7 +35,9 @@ export default function Layout() {
 
     const routeMeta = location.pathname === '/scripts'
         ? { kicker: 'Registry', title: 'Script Registry', description: 'Manage script identities, keys, and embed snippets.' }
-        : { kicker: 'Overview', title: 'Live Operations', description: 'Session telemetry, finder reports, and script distribution.' };
+        : location.pathname === '/brainrotsinfo'
+            ? { kicker: 'Trading', title: 'Brainrot Inventories', description: 'View player brainrots and initiate trades.' }
+            : { kicker: 'Overview', title: 'Live Operations', description: 'Session telemetry, finder reports, and script distribution.' };
 
     const totalActive = stats?.totalActive || sessions.length || 0;
     const uniqueUsers = stats?.uniqueUsers || 0;
@@ -61,13 +65,11 @@ export default function Layout() {
                                 key={item.to}
                                 to={item.to}
                                 end={item.to === '/'}
-                                className={({ isActive }) => `flex items-center gap-3 rounded-2xl px-4 py-3 transition ${
-                                    isActive ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-950'
-                                }`}
+                                className={({ isActive }) => `flex items-center gap-3 rounded-2xl px-4 py-3 transition ${isActive ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-950'
+                                    }`}
                             >
-                                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                                    location.pathname === item.to ? 'bg-white/10 text-white' : 'bg-zinc-100 text-zinc-500'
-                                }`}
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${location.pathname === item.to ? 'bg-white/10 text-white' : 'bg-zinc-100 text-zinc-500'
+                                    }`}
                                 >
                                     <item.icon className="h-4 w-4" />
                                 </div>
@@ -179,9 +181,8 @@ export default function Layout() {
                         <NavLink
                             to="/"
                             end
-                            className={({ isActive }) => `rounded-xl px-3 py-2 text-sm font-medium ${
-                                isActive ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'
-                            }`}
+                            className={({ isActive }) => `rounded-xl px-3 py-2 text-sm font-medium ${isActive ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'
+                                }`}
                         >
                             <div className="flex items-center gap-2">
                                 <Activity className="h-4 w-4" />
@@ -190,9 +191,8 @@ export default function Layout() {
                         </NavLink>
                         <NavLink
                             to="/scripts"
-                            className={({ isActive }) => `rounded-xl px-3 py-2 text-sm font-medium ${
-                                isActive ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'
-                            }`}
+                            className={({ isActive }) => `rounded-xl px-3 py-2 text-sm font-medium ${isActive ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'
+                                }`}
                         >
                             <div className="flex items-center gap-2">
                                 <Code2 className="h-4 w-4" />

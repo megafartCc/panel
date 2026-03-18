@@ -10,6 +10,7 @@ import AppLoader from './components/AppLoader';
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Scripts = lazy(() => import('./pages/Scripts'));
+const BrainrotsInfo = lazy(() => import('./pages/BrainrotsInfo'));
 
 createRoot(document.getElementById('root')).render(
     <StrictMode>
@@ -28,6 +29,7 @@ createRoot(document.getElementById('root')).render(
                         >
                             <Route index element={<Dashboard />} />
                             <Route path="scripts" element={<Scripts />} />
+                            <Route path="brainrotsinfo" element={<BrainrotsInfo />} />
                         </Route>
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>

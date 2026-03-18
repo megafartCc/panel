@@ -296,6 +296,68 @@ async function ensureChatReplyColumns() {
     }
 }
 
+async function ensureTradeSchema() {
+    await ensureDbReady();
+
+    if (isMySql()) {
+        await runStatements([
+            `CREATE TABLE IF NOT EXISTS trade_inventory (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                script_id CHAR(36) NOT NULL,
+                roblox_userid VARCHAR(32) NOT NULL,
+                roblox_user VARCHAR(64) NOT NULL DEFAULT '',
+                inventory_json LONGTEXT NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_trade_inv (script_id, roblox_userid),
+                KEY idx_trade_inv_updated (updated_at),
+                CONSTRAINT fk_trade_inv_script FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+            `CREATE TABLE IF NOT EXISTS trade_commands (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                script_id CHAR(36) NOT NULL,
+                requester_userid VARCHAR(32) NOT NULL DEFAULT '',
+                target_userid VARCHAR(32) NOT NULL,
+                target_username VARCHAR(64) NOT NULL DEFAULT '',
+                brainrot_slot INT DEFAULT -1,
+                brainrot_key VARCHAR(128) NOT NULL DEFAULT '',
+                brainrot_name VARCHAR(128) NOT NULL DEFAULT '',
+                status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                picked_up_at DATETIME NULL,
+                CONSTRAINT fk_trade_cmd_script FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+        ]);
+    } else {
+        await runStatements([
+            `CREATE TABLE IF NOT EXISTS trade_inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                script_id TEXT NOT NULL,
+                roblox_userid TEXT NOT NULL,
+                roblox_user TEXT NOT NULL DEFAULT '',
+                inventory_json TEXT NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
+                UNIQUE(script_id, roblox_userid)
+            )`,
+            'CREATE INDEX IF NOT EXISTS idx_trade_inv_updated ON trade_inventory(updated_at)',
+            `CREATE TABLE IF NOT EXISTS trade_commands (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                script_id TEXT NOT NULL,
+                requester_userid TEXT NOT NULL DEFAULT '',
+                target_userid TEXT NOT NULL,
+                target_username TEXT NOT NULL DEFAULT '',
+                brainrot_slot INTEGER DEFAULT -1,
+                brainrot_key TEXT NOT NULL DEFAULT '',
+                brainrot_name TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT DEFAULT (datetime('now')),
+                picked_up_at TEXT,
+                FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+            )`,
+        ]);
+    }
+}
+
 async function migrate() {
     await ensureDbReady();
 
@@ -454,6 +516,7 @@ async function migrate() {
     await ensureSessionsPlaceIdColumn();
     await ensureCloudPresetSchema();
     await ensureChatReplyColumns();
+    await ensureTradeSchema();
 
     const adminUser = process.env.ADMIN_USER || 'admin';
     const adminPass = process.env.ADMIN_PASS || 'changeme123';
@@ -526,6 +589,7 @@ module.exports = {
     dbGet,
     dbRun,
     ensureCloudPresetSchema,
+    ensureTradeSchema,
     getCutoffDateTime,
     isMySql,
     migrate,

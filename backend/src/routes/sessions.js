@@ -1,5 +1,5 @@
 const express = require('express');
-const { dbAll, dbGet, getCutoffDateTime } = require('../db');
+const { dbAll, dbGet, getCutoffDateTime, isMySql } = require('../db');
 const { authMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
@@ -95,32 +95,31 @@ router.get('/stats', async (req, res) => {
             ) grouped_users
         `);
 
-        const heartbeatRows = await dbAll(
-            'SELECT session_id, timestamp FROM heartbeat_log WHERE timestamp >= ? ORDER BY timestamp ASC',
-            [dayCutoff]
-        );
+        const hourlySql = isMySql()
+            ? `
+                SELECT
+                    DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00') AS hour,
+                    COUNT(DISTINCT session_id) AS users
+                FROM heartbeat_log
+                WHERE timestamp >= ?
+                GROUP BY DATE_FORMAT(timestamp, '%Y-%m-%d %H:00:00')
+                ORDER BY hour ASC
+            `
+            : `
+                SELECT
+                    strftime('%Y-%m-%d %H:00:00', timestamp) AS hour,
+                    COUNT(DISTINCT session_id) AS users
+                FROM heartbeat_log
+                WHERE timestamp >= ?
+                GROUP BY strftime('%Y-%m-%d %H:00:00', timestamp)
+                ORDER BY hour ASC
+            `;
 
-        const hourlyBuckets = new Map();
-        for (const row of heartbeatRows) {
-            const stamp = String(row.timestamp || '');
-            if (stamp.length < 13) {
-                continue;
-            }
-            const hourKey = stamp.slice(0, 13) + ':00:00';
-            let bucket = hourlyBuckets.get(hourKey);
-            if (!bucket) {
-                bucket = new Set();
-                hourlyBuckets.set(hourKey, bucket);
-            }
-            bucket.add(String(row.session_id || ''));
-        }
-
-        const hourlyActivity = Array.from(hourlyBuckets.entries())
-            .sort((left, right) => left[0].localeCompare(right[0]))
-            .map(([hour, users]) => ({
-                hour: hour.replace(' ', 'T'),
-                users: users.size,
-            }));
+        const heartbeatAggRows = await dbAll(hourlySql, [dayCutoff]);
+        const hourlyActivity = heartbeatAggRows.map((row) => ({
+            hour: String(row.hour || '').replace(' ', 'T'),
+            users: Number(row.users || 0),
+        }));
 
         res.json({
             totalActive: Number(totalActiveRow?.count || 0),

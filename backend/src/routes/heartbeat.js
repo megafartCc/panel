@@ -5,19 +5,11 @@ const { dbAll, dbGet, dbRun, getCutoffDateTime, toDbDateTime } = require('../db'
 
 const router = express.Router();
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(3, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
-const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
 const GLOBAL_UILIB_KEYS = [
     process.env.UILIB_CHAT_KEY,
     process.env.PANEL_CUSTOM_KEY,
     process.env.PANEL_KEY,
 ].filter((v) => typeof v === 'string' && v.trim() !== '');
-
-function logVerify(route, details) {
-    if (!HMAC_DEBUG) {
-        return;
-    }
-    console.log(`[HMAC:${route}]`, JSON.stringify(details));
-}
 
 function normalizeSignature(signature, expectedHex) {
     if (typeof signature !== 'string' || !signature) {
@@ -87,22 +79,7 @@ function validateSignedRequest({ route, script, userid, timestamp, signature, hm
     }));
     const sigHex = normalizeSignature(signature, expectedByKey[0].expectedHex);
 
-    logVerify(route, {
-        script,
-        userid: String(userid),
-        timestamp: String(timestamp),
-        incomingSignature: String(signature),
-        computedSignature: expectedByKey[0].expectedHex,
-        candidateCount: expectedByKey.length,
-        message,
-    });
-
     if (!sigHex) {
-        logVerify(route, {
-            script,
-            userid: String(userid),
-            reason: 'invalid_signature_format',
-        });
         return { ok: false, reason: 'format' };
     }
 
@@ -115,22 +92,8 @@ function validateSignedRequest({ route, script, userid, timestamp, signature, hm
     }
 
     if (!matched) {
-        logVerify(route, {
-            script,
-            userid: String(userid),
-            reason: 'signature_mismatch',
-            normalizedIncomingSignature: sigHex,
-            computedSignature: expectedByKey[0].expectedHex,
-        });
         return { ok: false, reason: 'mismatch' };
     }
-
-    logVerify(route, {
-        script,
-        userid: String(userid),
-        reason: 'signature_match',
-        keySource: matched.source,
-    });
 
     return { ok: true };
 }

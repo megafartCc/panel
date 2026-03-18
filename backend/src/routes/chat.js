@@ -11,7 +11,6 @@ const CHAT_MAX_LIMIT = Math.max(CHAT_DEFAULT_LIMIT, Number(process.env.CHAT_MAX_
 const CHAT_DEFAULT_ROOM = 'global';
 const CHAT_TYPING_TTL_SECONDS = Math.max(3, Number(process.env.CHAT_TYPING_TTL_SECONDS) || 7);
 const CHAT_RETENTION_SECONDS = Math.max(60, Number(process.env.CHAT_RETENTION_SECONDS) || 300);
-const HMAC_DEBUG = String(process.env.HMAC_DEBUG || '').toLowerCase() === 'true';
 const GLOBAL_UILIB_KEYS = [
     process.env.UILIB_CHAT_KEY,
     process.env.PANEL_CUSTOM_KEY,
@@ -76,13 +75,6 @@ function normalizeSignature(signature, expectedHex) {
     }
 }
 
-function logVerify(route, details) {
-    if (!HMAC_DEBUG) {
-        return;
-    }
-    console.log(`[HMAC:${route}]`, JSON.stringify(details));
-}
-
 async function verifySignedScriptPayload(payload) {
     const script = String(payload?.script || payload?.slug || payload?.script_slug || '').trim();
     const { userid, timestamp, signature } = payload || {};
@@ -115,19 +107,7 @@ async function verifySignedScriptPayload(payload) {
     }));
     const sigHex = normalizeSignature(signature, expectedByKey[0].expectedHex);
 
-    logVerify('chat', {
-        script,
-        userid: String(userid),
-        timestamp: String(timestamp),
-        incomingSignature: String(signature),
-        computedSignature: expectedByKey[0].expectedHex,
-        candidateCount: expectedByKey.length,
-        message,
-        hasScriptRow: true,
-    });
-
     if (!sigHex) {
-        logVerify('chat', { script, userid: String(userid), reason: 'invalid_signature_format' });
         return { ok: false, status: 401, error: 'Invalid signature format' };
     }
 
@@ -140,22 +120,8 @@ async function verifySignedScriptPayload(payload) {
     }
 
     if (!matched) {
-        logVerify('chat', {
-            script,
-            userid: String(userid),
-            reason: 'signature_mismatch',
-            normalizedIncomingSignature: sigHex,
-            computedSignature: expectedByKey[0].expectedHex,
-        });
         return { ok: false, status: 401, error: 'Invalid signature' };
     }
-
-    logVerify('chat', {
-        script,
-        userid: String(userid),
-        reason: 'signature_match',
-        keySource: matched.source,
-    });
 
     return { ok: true, scriptRow };
 }

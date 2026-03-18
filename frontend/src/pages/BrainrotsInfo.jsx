@@ -12,9 +12,21 @@ function formatNumber(n) {
 
 function timeAgo(dateStr) {
     if (!dateStr) return 'Unknown';
-    const now = new Date();
-    const then = new Date(dateStr + 'Z');
-    const diffS = Math.floor((now - then) / 1000);
+    const nowMs = Date.now();
+
+    let thenMs = null;
+    if (typeof dateStr === 'number' && Number.isFinite(dateStr)) {
+        thenMs = dateStr > 1e12 ? Math.floor(dateStr) : Math.floor(dateStr * 1000);
+    } else {
+        const parsed = new Date(dateStr);
+        if (!Number.isNaN(parsed.getTime())) {
+            thenMs = parsed.getTime();
+        }
+    }
+
+    if (!thenMs) return 'Unknown';
+
+    const diffS = Math.max(0, Math.floor((nowMs - thenMs) / 1000));
     if (diffS < 10) return 'just now';
     if (diffS < 60) return `${diffS}s ago`;
     if (diffS < 3600) return `${Math.floor(diffS / 60)}m ago`;
@@ -109,7 +121,7 @@ export default function BrainrotsInfo() {
 
     useEffect(() => {
         fetchInventory();
-        const interval = setInterval(fetchInventory, 10000);
+        const interval = setInterval(fetchInventory, 3000);
         return () => clearInterval(interval);
     }, [fetchInventory]);
 

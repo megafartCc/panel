@@ -6,7 +6,49 @@ const { dbAll, dbGet, dbRun, ensureTradeSchema, isMySql, toDbDateTime } = requir
 const router = express.Router();
 
 const SIGNATURE_WINDOW_SECONDS = 120;
-const INVENTORY_STALE_SECONDS = Math.max(30, Number(process.env.TRADE_INVENTORY_STALE_SECONDS) || 120);
+const INVENTORY_STALE_SECONDS = Math.max(30, Number(process.env.TRADE_INVENTORY_STALE_SECONDS) || 30);
+
+function toUnixMs(value) {
+    if (!value && value !== 0) return null;
+
+    if (value instanceof Date) {
+        const ms = value.getTime();
+        return Number.isFinite(ms) ? ms : null;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        if (value > 1e12) return Math.floor(value);
+        if (value > 0) return Math.floor(value * 1000);
+        return null;
+    }
+
+    if (typeof value === 'string') {
+        const raw = value.trim();
+        if (!raw) return null;
+
+        if (/^\d+$/.test(raw)) {
+            const numeric = Number(raw);
+            if (Number.isFinite(numeric) && numeric > 0) {
+                return numeric > 1e12 ? Math.floor(numeric) : Math.floor(numeric * 1000);
+            }
+        }
+
+        let parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed.getTime();
+        }
+
+        // Handle SQL-like "YYYY-MM-DD HH:mm:ss" timestamps.
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(raw)) {
+            parsed = new Date(raw.replace(' ', 'T') + 'Z');
+            if (!Number.isNaN(parsed.getTime())) {
+                return parsed.getTime();
+            }
+        }
+    }
+
+    return null;
+}
 
 // --- HMAC verification (same pattern as finder.js) ---
 
@@ -109,19 +151,28 @@ router.get('/inventory', authMiddleware, async (req, res) => {
              LIMIT 200`
         );
 
+        const nowMs = Date.now();
+        const staleMs = INVENTORY_STALE_SECONDS * 1000;
+
         const players = rows.map((row) => {
             let brainrots = [];
             try { brainrots = JSON.parse(row.inventory_json); } catch { }
+
+            const updatedMs = toUnixMs(row.updated_at);
 
             return {
                 userid: row.roblox_userid,
                 username: row.roblox_user,
                 script: row.script_slug,
                 scriptName: row.script_name,
-                updatedAt: row.updated_at,
+                updatedAt: updatedMs ? new Date(updatedMs).toISOString() : null,
+                updatedAtMs: updatedMs,
                 brainrots,
                 brainrotCount: brainrots.length,
             };
+        }).filter((player) => {
+            if (!player.updatedAtMs) return false;
+            return (nowMs - player.updatedAtMs) <= staleMs;
         });
 
         res.json({ ok: true, players });

@@ -183,19 +183,17 @@ router.post('/inventory', async (req, res) => {
 router.get('/inventory', authMiddleware, async (req, res) => {
     try {
         const cutoff = getCutoffDateTime(INVENTORY_STALE_SECONDS);
-        await dbRun('DELETE FROM trade_inventory WHERE updated_at < ?', [cutoff]);
 
         const rows = await dbAll(
             `SELECT ti.roblox_userid, ti.roblox_user, ti.inventory_json, ti.updated_at,
                     s.slug AS script_slug, s.name AS script_name
              FROM trade_inventory ti
              JOIN scripts s ON s.id = ti.script_id
+             WHERE ti.updated_at >= ?
              ORDER BY ti.updated_at DESC
-             LIMIT 200`
+             LIMIT 200`,
+            [cutoff]
         );
-
-        const nowMs = Date.now();
-        const staleMs = INVENTORY_STALE_SECONDS * 1000;
 
         const players = rows.map((row) => {
             let brainrots = [];
@@ -213,11 +211,11 @@ router.get('/inventory', authMiddleware, async (req, res) => {
                 brainrots,
                 brainrotCount: brainrots.length,
             };
-        }).filter((player) => {
-            if (!player.updatedAtMs) return false;
-            return (nowMs - player.updatedAtMs) <= staleMs;
         });
 
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         res.json({ ok: true, players });
     } catch (err) {
         console.error('[Trade] GET inventory error:', err.message);

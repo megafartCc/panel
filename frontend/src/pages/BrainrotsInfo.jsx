@@ -185,7 +185,7 @@ export default function BrainrotsInfo() {
 
     const fetchInventory = useCallback(async () => {
         try {
-            const data = await apiFetch('/trade/inventory');
+            const data = await apiFetch(`/trade/inventory?t=${Date.now()}`);
             setPlayers(data.players || []);
             setError(null);
         } catch (err) {
@@ -197,8 +197,19 @@ export default function BrainrotsInfo() {
 
     useEffect(() => {
         fetchInventory();
-        const interval = setInterval(fetchInventory, 3000);
-        return () => clearInterval(interval);
+        const interval = setInterval(fetchInventory, 1000);
+        const onFocus = () => {
+            if (!document.hidden) {
+                fetchInventory();
+            }
+        };
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onFocus);
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onFocus);
+        };
     }, [fetchInventory]);
 
     const handleTrade = async (player, selectedBrainrots, recipientUsername) => {

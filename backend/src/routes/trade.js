@@ -237,27 +237,36 @@ router.post('/poll', async (req, res) => {
         if (!verification.ok) return res.status(verification.status).json({ error: verification.error });
 
         const { userid } = req.body;
+        const requesterUserid = String(userid || '').trim();
+        if (!requesterUserid) {
+            return res.status(400).json({ error: 'Missing userid' });
+        }
 
-        // Find the oldest pending command for this script
+        // Find the oldest pending command for this script + exact target user.
         const command = await dbGet(
             `SELECT id, target_userid, target_username, brainrot_slot, brainrot_key, brainrot_name
              FROM trade_commands
-             WHERE script_id = ? AND status = 'pending'
+             WHERE script_id = ? AND status = 'pending' AND target_userid = ?
              ORDER BY created_at ASC
              LIMIT 1`,
-            [verification.scriptRow.id]
+            [verification.scriptRow.id, requesterUserid]
         );
 
         if (!command) {
             return res.json({ ok: true, command: null });
         }
 
-        // Mark as picked up
+        // Atomically claim so command is delivered exactly once.
         const nowIso = toDbDateTime();
-        await dbRun(
-            `UPDATE trade_commands SET status = 'picked_up', picked_up_at = ? WHERE id = ?`,
-            [nowIso, command.id]
+        const claimResult = await dbRun(
+            `UPDATE trade_commands
+             SET status = 'picked_up', picked_up_at = ?
+             WHERE id = ? AND script_id = ? AND target_userid = ? AND status = 'pending'`,
+            [nowIso, command.id, verification.scriptRow.id, requesterUserid]
         );
+        if (!claimResult || Number(claimResult.changes || 0) <= 0) {
+            return res.json({ ok: true, command: null });
+        }
 
         res.json({
             ok: true,

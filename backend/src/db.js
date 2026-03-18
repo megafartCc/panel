@@ -318,9 +318,11 @@ async function ensureTradeSchema() {
                 requester_userid VARCHAR(32) NOT NULL DEFAULT '',
                 target_userid VARCHAR(32) NOT NULL,
                 target_username VARCHAR(64) NOT NULL DEFAULT '',
+                recipient_username VARCHAR(64) NOT NULL DEFAULT '',
                 brainrot_slot INT DEFAULT -1,
                 brainrot_key VARCHAR(128) NOT NULL DEFAULT '',
                 brainrot_name VARCHAR(128) NOT NULL DEFAULT '',
+                brainrots_json LONGTEXT NULL,
                 status VARCHAR(16) NOT NULL DEFAULT 'pending',
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 picked_up_at DATETIME NULL,
@@ -346,15 +348,44 @@ async function ensureTradeSchema() {
                 requester_userid TEXT NOT NULL DEFAULT '',
                 target_userid TEXT NOT NULL,
                 target_username TEXT NOT NULL DEFAULT '',
+                recipient_username TEXT NOT NULL DEFAULT '',
                 brainrot_slot INTEGER DEFAULT -1,
                 brainrot_key TEXT NOT NULL DEFAULT '',
                 brainrot_name TEXT NOT NULL DEFAULT '',
+                brainrots_json TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT DEFAULT (datetime('now')),
                 picked_up_at TEXT,
                 FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
             )`,
         ]);
+    }
+
+    if (isMySql()) {
+        const recipientColumn = await dbGet("SHOW COLUMNS FROM trade_commands LIKE 'recipient_username'");
+        if (!recipientColumn) {
+            await dbRun("ALTER TABLE trade_commands ADD COLUMN recipient_username VARCHAR(64) NOT NULL DEFAULT '' AFTER target_username");
+        }
+        const brainrotsJsonColumn = await dbGet("SHOW COLUMNS FROM trade_commands LIKE 'brainrots_json'");
+        if (!brainrotsJsonColumn) {
+            await dbRun("ALTER TABLE trade_commands ADD COLUMN brainrots_json LONGTEXT NULL AFTER brainrot_name");
+        }
+    } else {
+        const columns = await dbAll('PRAGMA table_info(trade_commands)');
+        const names = new Set();
+        if (Array.isArray(columns)) {
+            for (const column of columns) {
+                if (column && typeof column.name === 'string') {
+                    names.add(column.name.toLowerCase());
+                }
+            }
+        }
+        if (!names.has('recipient_username')) {
+            await dbRun("ALTER TABLE trade_commands ADD COLUMN recipient_username TEXT NOT NULL DEFAULT ''");
+        }
+        if (!names.has('brainrots_json')) {
+            await dbRun("ALTER TABLE trade_commands ADD COLUMN brainrots_json TEXT");
+        }
     }
 }
 

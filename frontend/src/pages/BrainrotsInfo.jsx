@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../lib/api';
-import { Brain, User, Clock, ArrowRight, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Brain, User, ArrowRight, Check, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 
 function formatNumber(n) {
     if (typeof n !== 'number') return '0';
@@ -34,11 +34,48 @@ function timeAgo(dateStr) {
     return `${Math.floor(diffS / 86400)}d ago`;
 }
 
+function getBrainrotId(brainrot, index) {
+    const slot = typeof brainrot?.slot === 'number' ? brainrot.slot : `x${index}`;
+    const key = String(brainrot?.key || brainrot?.name || index);
+    return `${slot}:${key}`;
+}
+
 function PlayerCard({ player, onTrade }) {
     const [expanded, setExpanded] = useState(false);
+    const [recipientUsername, setRecipientUsername] = useState('');
+    const [selectedMap, setSelectedMap] = useState({});
     const { username, userid, brainrots, brainrotCount, updatedAt } = player;
 
     const sorted = [...(brainrots || [])].sort((a, b) => (b.moneyPerSec || 0) - (a.moneyPerSec || 0));
+    const selectedBrainrots = sorted
+        .map((brainrot, index) => ({ brainrot, id: getBrainrotId(brainrot, index) }))
+        .filter(({ id }) => selectedMap[id])
+        .map(({ brainrot }) => brainrot);
+
+    const selectedCount = selectedBrainrots.length;
+
+    const toggleSelection = (id) => {
+        setSelectedMap((prev) => ({
+            ...prev,
+            [id]: !prev[id],
+        }));
+    };
+
+    const selectAll = () => {
+        const next = {};
+        for (let i = 0; i < sorted.length; i += 1) {
+            next[getBrainrotId(sorted[i], i)] = true;
+        }
+        setSelectedMap(next);
+    };
+
+    const clearSelection = () => {
+        setSelectedMap({});
+    };
+
+    const handleSendSelected = () => {
+        onTrade(player, selectedBrainrots, recipientUsername.trim());
+    };
 
     return (
         <div className="card overflow-hidden">
@@ -73,26 +110,65 @@ function PlayerCard({ player, onTrade }) {
                     {sorted.length === 0 ? (
                         <p className="px-5 py-6 text-center text-sm text-zinc-400">No brainrots reported</p>
                     ) : (
-                        <div className="divide-y divide-zinc-50">
-                            {sorted.map((br, i) => (
-                                <div key={br.key || br.name + i} className="flex items-center justify-between gap-3 px-5 py-3 transition hover:bg-zinc-50/80">
-                                    <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-medium text-zinc-900">{br.name}</p>
-                                        <p className="mt-0.5 text-xs text-zinc-400">
-                                            ${formatNumber(br.moneyPerSec || 0)}/s
-                                            {typeof br.slot === 'number' && <span className="ml-2">Slot {br.slot}</span>}
-                                        </p>
-                                    </div>
+                        <div>
+                            <div className="flex flex-col gap-2 border-b border-zinc-100 px-5 py-3 sm:flex-row sm:items-center">
+                                <input
+                                    type="text"
+                                    value={recipientUsername}
+                                    onChange={(event) => setRecipientUsername(event.target.value)}
+                                    placeholder="Send trade to username..."
+                                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-400 sm:flex-1"
+                                />
+                                <div className="flex items-center gap-2">
                                     <button
                                         type="button"
-                                        onClick={() => onTrade(player, br)}
-                                        className="flex items-center gap-1.5 rounded-xl bg-zinc-900 px-3.5 py-2 text-xs font-medium text-white transition hover:bg-zinc-800"
+                                        onClick={selectAll}
+                                        className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
                                     >
-                                        Trade
+                                        Select all
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={clearSelection}
+                                        className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+                                    >
+                                        Clear
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={!recipientUsername.trim() || selectedCount === 0}
+                                        onClick={handleSendSelected}
+                                        className="flex items-center gap-1.5 rounded-xl bg-zinc-900 px-3.5 py-2 text-xs font-medium text-white transition enabled:hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Trade {selectedCount > 0 ? `(${selectedCount})` : ''}
                                         <ArrowRight className="h-3 w-3" />
                                     </button>
                                 </div>
-                            ))}
+                            </div>
+
+                            <div className="divide-y divide-zinc-50">
+                                {sorted.map((br, i) => {
+                                    const id = getBrainrotId(br, i);
+                                    const checked = !!selectedMap[id];
+                                    return (
+                                        <button
+                                            key={id}
+                                            type="button"
+                                            onClick={() => toggleSelection(id)}
+                                            className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left transition hover:bg-zinc-50/80"
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate text-sm font-medium text-zinc-900">{br.name}</p>
+                                                <p className="mt-0.5 text-xs text-zinc-400">
+                                                    ${formatNumber(br.moneyPerSec || 0)}/s
+                                                    {typeof br.slot === 'number' && <span className="ml-2">Slot {br.slot}</span>}
+                                                </p>
+                                            </div>
+                                            <div className={`h-5 w-5 rounded border ${checked ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-300 bg-white'}`} />
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
                     )}
                 </div>
@@ -125,23 +201,46 @@ export default function BrainrotsInfo() {
         return () => clearInterval(interval);
     }, [fetchInventory]);
 
-    const handleTrade = async (player, brainrot) => {
+    const handleTrade = async (player, selectedBrainrots, recipientUsername) => {
         try {
-            const data = await apiFetch('/trade/command', {
+            const recipient = String(recipientUsername || '').trim();
+            if (!recipient) {
+                throw new Error('Enter recipient username');
+            }
+
+            const list = Array.isArray(selectedBrainrots) ? selectedBrainrots : [];
+            if (list.length === 0) {
+                throw new Error('Select at least one brainrot');
+            }
+
+            const normalized = list.map((brainrot) => ({
+                slot: typeof brainrot?.slot === 'number' ? brainrot.slot : -1,
+                key: brainrot?.key || brainrot?.name || '',
+                name: brainrot?.name || brainrot?.key || '',
+            })).filter((entry) => entry.name || entry.key);
+
+            if (normalized.length === 0) {
+                throw new Error('Selected brainrots are invalid');
+            }
+
+            const first = normalized[0];
+            await apiFetch('/trade/command', {
                 method: 'POST',
                 body: JSON.stringify({
                     targetUserid: player.userid,
                     targetUsername: player.username,
-                    brainrotSlot: brainrot.slot,
-                    brainrotKey: brainrot.key || brainrot.name,
-                    brainrotName: brainrot.name,
+                    recipientUsername: recipient,
+                    brainrotSlot: first.slot,
+                    brainrotKey: first.key,
+                    brainrotName: first.name,
+                    brainrots: normalized,
                     script: player.script || 'sabnew',
                 }),
             });
 
             setToast({
                 type: 'success',
-                message: `Trade command queued: ${brainrot.name} from ${player.username}`,
+                message: `Queued ${normalized.length} brainrots from ${player.username} to ${recipient}`,
             });
         } catch (err) {
             setToast({ type: 'error', message: err.message });

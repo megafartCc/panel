@@ -394,6 +394,8 @@ local function resolveLuarmorDiscordId()
     return ""
 end
 
+local runtimeConfig
+
 local function buildSignedPayload(scriptSlug, hmacKey, extra)
     local signingKey = resolveSigningKey(hmacKey, extra)
     local timestamp = tostring(math.floor(os.time()))
@@ -417,9 +419,19 @@ local function buildSignedPayload(scriptSlug, hmacKey, extra)
         end
     end
 
-    local luarmorDiscordId = resolveLuarmorDiscordId()
-    if luarmorDiscordId ~= "" and (payload.discord_id == nil or tostring(payload.discord_id) == "") then
-        payload.discord_id = luarmorDiscordId
+    local configuredDiscordId = ""
+    if type(extra) == "table" then
+        configuredDiscordId = trimRuntimeText(extra.discord_id or extra.discordId)
+    end
+    if configuredDiscordId == "" and type(runtimeConfig) == "table" then
+        configuredDiscordId = trimRuntimeText(runtimeConfig.discordId)
+    end
+    if configuredDiscordId == "" then
+        configuredDiscordId = resolveLuarmorDiscordId()
+    end
+
+    if configuredDiscordId ~= "" and (payload.discord_id == nil or tostring(payload.discord_id) == "") then
+        payload.discord_id = configuredDiscordId
     end
 
     return payload
@@ -433,11 +445,12 @@ local function sendSignedRequest(panelUrl, scriptSlug, hmacKey, path, extra)
     return postJson(panelUrl, path, payload)
 end
 
-local runtimeConfig = {
+runtimeConfig = {
     panelUrl = nil,
     scriptSlug = nil,
     hmacKey = nil,
     customKey = nil,
+    discordId = nil,
 }
 
 local lastAutoHeartbeatAt = 0
@@ -464,10 +477,20 @@ local function publishRuntimeConfig()
     envTable.PanelCustomKey = runtimeConfig.customKey
 end
 
-local function rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+local function rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     runtimeConfig.panelUrl = tostring(panelUrl or ""):gsub("/$", "")
     runtimeConfig.scriptSlug = tostring(scriptSlug or "")
     runtimeConfig.hmacKey = tostring(hmacKey or "")
+
+    local configuredDiscordId = ""
+    if type(options) == "table" then
+        configuredDiscordId = trimRuntimeText(options.discord_id or options.discordId)
+    end
+    if configuredDiscordId == "" then
+        configuredDiscordId = resolveLuarmorDiscordId()
+    end
+    runtimeConfig.discordId = configuredDiscordId ~= "" and configuredDiscordId or nil
+
     publishRuntimeConfig()
 end
 
@@ -649,7 +672,7 @@ function PanelSDK.sharedUsers(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/peers", {
@@ -667,7 +690,7 @@ function PanelSDK.connectionStats(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/connections", {
@@ -685,7 +708,7 @@ function PanelSDK.sharedServers(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/heartbeat/servers", {
@@ -702,7 +725,7 @@ function PanelSDK.chatSend(panelUrl, scriptSlug, hmacKey, messageText, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     local text = tostring(messageText or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -744,7 +767,7 @@ function PanelSDK.chatFeed(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/feed", {
@@ -762,7 +785,7 @@ function PanelSDK.chatTyping(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     local isTyping = options.is_typing == true or options.isTyping == true or options.typing == true
@@ -781,7 +804,7 @@ function PanelSDK.chatTypingStatus(panelUrl, scriptSlug, hmacKey, options)
         return false, { error = "missing panel config" }
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     maybeAutoHeartbeat(panelUrl, scriptSlug, hmacKey)
 
     return sendSignedRequest(panelUrl, scriptSlug, hmacKey, "/api/chat/typing_status", {
@@ -830,7 +853,7 @@ function PanelSDK.monitor(panelUrl, scriptSlug, hmacKey, options)
         return false, "missing panel config"
     end
 
-    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey)
+    rememberRuntimeConfig(panelUrl, scriptSlug, hmacKey, options)
     panelUrl = tostring(panelUrl):gsub("/$", "")
     options = type(options) == "table" and options or {}
 

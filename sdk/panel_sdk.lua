@@ -391,21 +391,6 @@ local function resolveLuarmorDiscordId()
         end
     end
 
-    local direct = trimRuntimeText(rawget(_G, "LRM_LinkedDiscordID"))
-    if direct ~= "" then
-        return direct
-    end
-
-    if type(getgenv) == "function" then
-        local okEnv, envTable = pcall(getgenv)
-        if okEnv and type(envTable) == "table" then
-            local envValue = trimRuntimeText(envTable.LRM_LinkedDiscordID)
-            if envValue ~= "" then
-                return envValue
-            end
-        end
-    end
-
     return ""
 end
 

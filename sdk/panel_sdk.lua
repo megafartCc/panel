@@ -373,6 +373,32 @@ end
 
 local resolveSigningKey
 
+local function trimRuntimeText(value)
+    if value == nil then
+        return ""
+    end
+    return tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function resolveLuarmorDiscordId()
+    local direct = trimRuntimeText(rawget(_G, "LRM_LinkedDiscordID"))
+    if direct ~= "" then
+        return direct
+    end
+
+    if type(getgenv) == "function" then
+        local okEnv, envTable = pcall(getgenv)
+        if okEnv and type(envTable) == "table" then
+            local envValue = trimRuntimeText(envTable.LRM_LinkedDiscordID)
+            if envValue ~= "" then
+                return envValue
+            end
+        end
+    end
+
+    return ""
+end
+
 local function buildSignedPayload(scriptSlug, hmacKey, extra)
     local signingKey = resolveSigningKey(hmacKey, extra)
     local timestamp = tostring(math.floor(os.time()))
@@ -394,6 +420,11 @@ local function buildSignedPayload(scriptSlug, hmacKey, extra)
         for key, value in pairs(extra) do
             payload[key] = value
         end
+    end
+
+    local luarmorDiscordId = resolveLuarmorDiscordId()
+    if luarmorDiscordId ~= "" and (payload.discord_id == nil or tostring(payload.discord_id) == "") then
+        payload.discord_id = luarmorDiscordId
     end
 
     return payload

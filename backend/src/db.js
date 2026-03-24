@@ -164,6 +164,8 @@ function initVolatileDb() {
             script_id TEXT NOT NULL,
             roblox_user TEXT NOT NULL,
             roblox_userid TEXT NOT NULL,
+            discord_id TEXT DEFAULT '',
+            discord_username TEXT DEFAULT '',
             executor TEXT DEFAULT 'Unknown',
             server_jobid TEXT DEFAULT '',
             place_id TEXT DEFAULT '',
@@ -589,6 +591,47 @@ async function ensureTradeSchema() {
     }
 }
 
+async function ensureSessionsDiscordColumns() {
+    await ensureDbReady();
+
+    if (isMySql()) {
+        const discordId = await dbGet("SHOW COLUMNS FROM sessions LIKE 'discord_id'");
+        if (!discordId) {
+            await dbRun("ALTER TABLE sessions ADD COLUMN discord_id VARCHAR(32) DEFAULT '' AFTER roblox_userid");
+        }
+
+        const discordUsername = await dbGet("SHOW COLUMNS FROM sessions LIKE 'discord_username'");
+        if (!discordUsername) {
+            await dbRun("ALTER TABLE sessions ADD COLUMN discord_username VARCHAR(64) DEFAULT '' AFTER discord_id");
+        }
+        return;
+    }
+
+    const columns = await dbAll('PRAGMA table_info(sessions)');
+    let hasDiscordId = false;
+    let hasDiscordUsername = false;
+    if (Array.isArray(columns)) {
+        for (const column of columns) {
+            const name = column && typeof column.name === 'string'
+                ? column.name.toLowerCase()
+                : '';
+            if (name === 'discord_id') {
+                hasDiscordId = true;
+            } else if (name === 'discord_username') {
+                hasDiscordUsername = true;
+            }
+        }
+    }
+
+    if (!hasDiscordId) {
+        await dbRun("ALTER TABLE sessions ADD COLUMN discord_id TEXT DEFAULT ''");
+    }
+
+    if (!hasDiscordUsername) {
+        await dbRun("ALTER TABLE sessions ADD COLUMN discord_username TEXT DEFAULT ''");
+    }
+}
+
 async function migrate() {
     await ensureDbReady();
     inMigration = true;
@@ -614,6 +657,8 @@ async function migrate() {
                 script_id CHAR(36) NOT NULL,
                 roblox_user VARCHAR(64) NOT NULL,
                 roblox_userid VARCHAR(32) NOT NULL,
+                discord_id VARCHAR(32) DEFAULT '',
+                discord_username VARCHAR(64) DEFAULT '',
                 executor VARCHAR(64) DEFAULT 'Unknown',
                 server_jobid VARCHAR(96) DEFAULT '',
                 place_id VARCHAR(32) DEFAULT '',
@@ -689,6 +734,8 @@ async function migrate() {
                 script_id TEXT NOT NULL,
                 roblox_user TEXT NOT NULL,
                 roblox_userid TEXT NOT NULL,
+                discord_id TEXT DEFAULT '',
+                discord_username TEXT DEFAULT '',
                 executor TEXT DEFAULT 'Unknown',
                 server_jobid TEXT DEFAULT '',
                 place_id TEXT DEFAULT '',
@@ -747,6 +794,7 @@ async function migrate() {
         }
 
         await ensureSessionsPlaceIdColumn();
+        await ensureSessionsDiscordColumns();
         await ensureCloudPresetSchema();
         await ensureChatReplyColumns();
         await ensureTradeSchema();

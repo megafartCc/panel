@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { dbAll, dbGet, dbRun, getCutoffDateTime, toDbDateTime } = require('../db');
+const { resolveDiscordIdentity } = require('../discordResolver');
 
 const router = express.Router();
 const ACTIVE_SESSION_TIMEOUT_SECONDS = Math.max(3, Number(process.env.SESSION_TIMEOUT_SECONDS) || 10);
@@ -118,6 +119,8 @@ router.post('/', async (req, res) => {
         const body = req.body || {};
         const script = String(body.script || body.slug || body.script_slug || '').trim();
         const { user, userid, executor, jobid, placeid, timestamp, signature } = body;
+        const normalizedDiscordId = String(body.discord_id ?? body.discordId ?? '').trim();
+        const normalizedDiscordUsername = String(body.discord_username ?? body.discordUsername ?? '').trim();
 
         if (!script || !user || !userid || !timestamp || !signature) {
             return res.status(400).json({ error: 'Missing fields' });
@@ -154,24 +157,75 @@ router.post('/', async (req, res) => {
         const normalizedPlaceId = String(placeid || '').trim();
 
         const existing = await dbGet(
-            'SELECT id FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1',
+            'SELECT id, discord_id, discord_username FROM sessions WHERE script_id = ? AND roblox_userid = ? AND is_active = 1',
             [scriptRow.id, String(userid)]
         );
+
+        const existingDiscordId = existing && existing.discord_id != null
+            ? String(existing.discord_id).trim()
+            : '';
+        const existingDiscordUsername = existing && existing.discord_username != null
+            ? String(existing.discord_username).trim()
+            : '';
+
+        let discordIdentity = {
+            discordId: existingDiscordId,
+            discordUsername: existingDiscordUsername,
+        };
+
+        if (normalizedDiscordId) {
+            const shouldResolveDiscord = normalizedDiscordId !== existingDiscordId
+                || normalizedDiscordUsername !== ''
+                || existingDiscordUsername === '';
+            if (shouldResolveDiscord) {
+                discordIdentity = await resolveDiscordIdentity({
+                    discordId: normalizedDiscordId,
+                    discordUsername: normalizedDiscordUsername,
+                });
+            } else {
+                discordIdentity = {
+                    discordId: existingDiscordId,
+                    discordUsername: existingDiscordUsername,
+                };
+            }
+        }
 
         let sessionId;
         if (existing) {
             sessionId = existing.id;
             await dbRun(
-                'UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, place_id = ?, ip_address = ? WHERE id = ?',
-                [nowIso, executor || 'Unknown', jobid || '', normalizedPlaceId, String(ip), sessionId]
+                'UPDATE sessions SET last_heartbeat = ?, executor = ?, server_jobid = ?, place_id = ?, ip_address = ?, discord_id = ?, discord_username = ? WHERE id = ?',
+                [
+                    nowIso,
+                    executor || 'Unknown',
+                    jobid || '',
+                    normalizedPlaceId,
+                    String(ip),
+                    discordIdentity.discordId || '',
+                    discordIdentity.discordUsername || '',
+                    sessionId,
+                ]
             );
         } else {
             sessionId = uuidv4();
             await dbRun(
                 `INSERT INTO sessions (
-                    id, script_id, roblox_user, roblox_userid, executor, server_jobid, place_id, ip_address, first_seen, last_heartbeat, is_active
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-                [sessionId, scriptRow.id, String(user), String(userid), executor || 'Unknown', jobid || '', normalizedPlaceId, String(ip), nowIso, nowIso]
+                    id, script_id, roblox_user, roblox_userid, discord_id, discord_username, executor, server_jobid, place_id, ip_address, first_seen, last_heartbeat, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+                [
+                    sessionId,
+                    scriptRow.id,
+                    String(user),
+                    String(userid),
+                    discordIdentity.discordId || '',
+                    discordIdentity.discordUsername || '',
+                    executor || 'Unknown',
+                    jobid || '',
+                    normalizedPlaceId,
+                    String(ip),
+                    nowIso,
+                    nowIso,
+                ]
             );
         }
 
@@ -225,6 +279,8 @@ router.post('/peers', async (req, res) => {
             SELECT
                 s.roblox_user,
                 s.roblox_userid,
+                s.discord_id,
+                s.discord_username,
                 s.server_jobid,
                 s.place_id,
                 s.last_heartbeat,
@@ -272,6 +328,8 @@ router.post('/peers', async (req, res) => {
             users.push({
                 user: rowUser,
                 userid: rowUserId,
+                discord_id: row && row.discord_id != null ? String(row.discord_id) : '',
+                discord_username: row && row.discord_username != null ? String(row.discord_username) : '',
                 jobid: row && row.server_jobid != null ? String(row.server_jobid) : '',
                 placeid: row && row.place_id != null ? String(row.place_id) : '',
                 script_slug: row && row.script_slug != null ? String(row.script_slug) : '',
@@ -439,6 +497,8 @@ router.post('/servers', async (req, res) => {
             SELECT
                 s.roblox_user,
                 s.roblox_userid,
+                s.discord_id,
+                s.discord_username,
                 s.server_jobid,
                 s.place_id,
                 s.last_heartbeat,
@@ -507,6 +567,8 @@ router.post('/servers', async (req, res) => {
             bucket.users.push({
                 user: rowUser,
                 userid: rowUserId,
+                discord_id: row && row.discord_id != null ? String(row.discord_id) : '',
+                discord_username: row && row.discord_username != null ? String(row.discord_username) : '',
                 script_slug: rowScriptSlug,
                 script_name: rowScriptName,
                 game: rowGameName,

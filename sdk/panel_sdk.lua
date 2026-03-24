@@ -381,6 +381,16 @@ local function trimRuntimeText(value)
 end
 
 local function resolveLuarmorDiscordId()
+    local okRuntime, runtimeValue = pcall(function()
+        return LRM_LinkedDiscordID
+    end)
+    if okRuntime then
+        local runtimeDiscordId = trimRuntimeText(runtimeValue)
+        if runtimeDiscordId ~= "" then
+            return runtimeDiscordId
+        end
+    end
+
     local direct = trimRuntimeText(rawget(_G, "LRM_LinkedDiscordID"))
     if direct ~= "" then
         return direct
